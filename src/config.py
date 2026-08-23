@@ -1,13 +1,15 @@
 from pathlib import Path
 
 # ── Paths ──────────────────────────────────────────────────────────────────
-BASE_DIR   = Path(__file__).parent.parent
-DATA_DIR   = BASE_DIR / "data"
-MODELS_DIR = BASE_DIR / "models"
-PLOTS_DIR  = BASE_DIR / "plots"
+BASE_DIR       = Path(__file__).parent.parent
+DATA_DIR       = BASE_DIR / "data"
+MODELS_DIR     = BASE_DIR / "models"
+PLOTS_DIR      = BASE_DIR / "plots"
+AUDIT_LOG_PATH = BASE_DIR / "logs" / "audit.jsonl"   # append-only prediction audit log
 
 for _d in (DATA_DIR, MODELS_DIR, PLOTS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
+# logs/ is created on first write by audit.py — no need to mkdir here.
 
 # ── Dataset columns ─────────────────────────────────────────────────────────
 # These match the Kaggle IT Service Ticket Classification Dataset.

@@ -1,5 +1,7 @@
 # Confidence-Aware IT Ticket Routing & Escalation System
 
+![CI](https://github.com/starlord0104/ticket-routing-agent/actions/workflows/ci.yml/badge.svg)
+
 Routes IT support tickets to 7 operational queues using calibrated confidence scores.
 Tickets below a tunable threshold are escalated to human agents rather than auto-routed.
 
@@ -247,6 +249,16 @@ streamlit run app/streamlit_app.py
 ```
 Or: `docker-compose up --build`
 
+### 8. Monitor
+```bash
+curl "http://localhost:8000/monitor?window_hours=24"
+```
+Returns escalation rate, OOD rate, and correction rate over the last 24 h.
+Alert flags fire if any KPI exceeds the thresholds in `src/audit.py`.
+
+### Deploy to HuggingFace Spaces
+See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step instructions.
+
 ---
 
 ## Project structure
@@ -289,6 +301,21 @@ Or: `docker-compose up --build`
 
 ---
 
+## API endpoints
+
+| Method | Path             | Purpose |
+|--------|------------------|---------|
+| `POST` | `/predict`       | Classify ticket → category, confidence, OOD flag, historical tickets |
+| `POST` | `/feedback`      | Record agent correction; correlates with prediction via `ticket_id` |
+| `GET`  | `/monitor`       | Rolling-window KPIs: escalation rate, OOD rate, correction rate |
+| `GET`  | `/health`        | Liveness check — returns embedding mode, temperature, threshold |
+| `GET`  | `/categories`    | List of the 7 routing queues |
+| `POST` | `/set-threshold` | Adjust τ at runtime without restarting |
+
+OpenAPI docs: `http://localhost:8000/docs`
+
+---
+
 ## Stack
 
 | Component       | Library                 | Why |
@@ -301,6 +328,8 @@ Or: `docker-compose up --build`
 | API             | FastAPI                 | Async; auto-generates OpenAPI docs |
 | UI              | Streamlit               | Demo-ready; plots embedded inline |
 | Containerisation| Docker + Compose        | Single command to run everything |
+| CI              | GitHub Actions          | pytest on every push (unit tests; integration tests skip without models) |
+| Audit log       | JSONL (append-only)     | Every prediction + agent correction recorded; feeds /monitor KPIs |
 
 ---
 

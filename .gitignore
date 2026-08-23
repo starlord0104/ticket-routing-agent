@@ -18,6 +18,9 @@ models/*.pkl
 models/*.bin
 models/*.npy
 
+# ── Runtime audit log (regenerates from live traffic; not source) ────────────
+logs/
+
 # ── OS / editor cruft ────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db

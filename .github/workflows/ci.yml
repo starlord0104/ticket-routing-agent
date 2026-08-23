@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Unit tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        # The API integration tests (test_predict_*, test_feedback_*, test_monitor_*)
+        # require trained model artefacts (classifier.pkl, faiss_index.bin, …).
+        # Those are excluded from the repo (.gitignore) — CI only runs the
+        # self-contained unit tests that need no data or trained models.
+        run: |
+          pytest -q \
+            tests/test_preprocess.py \
+            tests/test_classifier.py \
+            tests/test_ood.py \
+            tests/test_audit.py \
+            tests/test_api.py::test_app_module_has_required_routes
