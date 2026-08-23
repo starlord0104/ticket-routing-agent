@@ -259,13 +259,16 @@ with tab_route:
         )
         st.stop()
 
-    # Pop auto-route flag set by quick-example buttons on previous run
+    # Buttons cannot write a widget's key after it has rendered (Streamlit rule).
+    # Instead, buttons write to a staging key (_pending_sample). On the next rerun
+    # we transfer it to the widget key BEFORE the text area renders.
     _auto_route = st.session_state.pop("_auto_route", False)
+    _pending    = st.session_state.pop("_pending_sample", None)
+    if _pending is not None:
+        st.session_state["_ticket_text"] = _pending   # safe: widget not yet rendered
 
     col_input, col_samples = st.columns([3, 1])
     with col_input:
-        # key= lets us write to session_state["_ticket_text"] from the buttons
-        # below and have the widget pick up the new value immediately on rerun.
         ticket_text = st.text_area(
             "Paste support ticket text",
             key="_ticket_text",
@@ -276,9 +279,7 @@ with tab_route:
         st.markdown("**Quick examples**")
         for cat in SAMPLES:
             if st.button(cat, use_container_width=True, key=f"sample_{cat}"):
-                # Writing the widget key directly into session_state overrides
-                # the text area on the very next rerun — value= does not do this.
-                st.session_state["_ticket_text"] = SAMPLES[cat]
+                st.session_state["_pending_sample"] = SAMPLES[cat]
                 st.session_state["_auto_route"] = True
                 st.rerun()
 
