@@ -325,14 +325,14 @@ SAMPLES = {
                          "I cannot access any of my files or applications.",
     "Storage":           "My drive is full and I cannot save any files. "
                          "I keep getting a disk full error on every save.",
-    "HR Support":        "We have a new employee starting on Monday. Please set up "
-                         "their email account and system access before they arrive.",
+    "HR Support":        "A new team member is joining us on Monday. Please create "
+                         "their corporate email account and add them to the department group.",
     "Procurement":       "Please raise a purchase order for five additional monitors and "
                          "keyboards. We need them for new team members joining next month.",
     "Internal Project":  "Please reassign the Q3 project tasks to the new team lead "
                          "and mark the previous milestones as complete in the tracker.",
-    "General IT":        "The printer on the third floor has stopped working. "
-                         "Nobody in the office is able to print any documents today.",
+    "General IT":        "My work phone has stopped receiving corporate emails overnight. "
+                         "It was syncing fine yesterday but nothing is coming through today.",
 }
 
 with tab_route:
