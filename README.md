@@ -1,3 +1,14 @@
+---
+title: IT Ticket Routing Agent
+emoji: 🎫
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+sdk_version: 1.38.0
+app_file: spaces_app.py
+pinned: false
+---
+
 # Confidence-Aware IT Ticket Routing & Escalation System
 
 ![CI](https://github.com/starlord0104/ticket-routing-agent/actions/workflows/ci.yml/badge.svg)
