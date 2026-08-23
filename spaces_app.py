@@ -260,10 +260,8 @@ with tab_route:
         st.stop()
 
     # Buttons cannot write a widget's key after it has rendered (Streamlit rule).
-    # Instead, buttons write to a staging key (_pending_sample). On the next rerun
-    # we transfer it to the widget key BEFORE the text area renders.
-    _auto_route = st.session_state.pop("_auto_route", False)
-    _pending    = st.session_state.pop("_pending_sample", None)
+    # Stage the sample in _pending_sample; transfer to the widget key before render.
+    _pending = st.session_state.pop("_pending_sample", None)
     if _pending is not None:
         st.session_state["_ticket_text"] = _pending   # safe: widget not yet rendered
 
@@ -280,12 +278,11 @@ with tab_route:
         for cat in SAMPLES:
             if st.button(cat, use_container_width=True, key=f"sample_{cat}"):
                 st.session_state["_pending_sample"] = SAMPLES[cat]
-                st.session_state["_auto_route"] = True
                 st.rerun()
 
     submit = st.button("🚀  Route ticket", type="primary", disabled=not ticket_text)
 
-    if (submit or _auto_route) and ticket_text:
+    if submit and ticket_text:
         with st.spinner("Routing …"):
             import time
             t0   = time.perf_counter()
