@@ -62,7 +62,7 @@ if _embedding_mode == "minilm":
         print(f"[robustness] ERROR: MiniLM unavailable ({exc}). "
               "Run train.py --embedding tfidf to use the TF-IDF model instead.")
         sys.exit(1)
-else:  # tfidf
+elif _embedding_mode == "tfidf":
     from sklearn.preprocessing import normalize as _sk_norm
     _tfidf_v = joblib.load(MODELS_DIR / "tfidf.pkl")
     _svd_v   = joblib.load(MODELS_DIR / "svd.pkl")
@@ -72,6 +72,27 @@ else:  # tfidf
         X = _tfidf_v.transform(texts)
         return _sk_norm(_svd_v.transform(X).astype(np.float32), norm="l2")
     print("[robustness] TF-IDF embeddings loaded.\n")
+
+else:  # hybrid — TF-IDF classifier + MiniLM FAISS retrieval
+    from sklearn.preprocessing import normalize as _sk_norm
+    _tfidf_v = joblib.load(MODELS_DIR / "tfidf.pkl")
+    def _encode_clf(texts):
+        return _tfidf_v.transform(texts)   # sparse TF-IDF — for classifier
+
+    try:
+        from sentence_transformers import SentenceTransformer
+        from src.config import EMBEDDING_MODEL
+        _m_hybrid = SentenceTransformer(EMBEDDING_MODEL, local_files_only=True)
+        def _encode_faiss(texts):
+            return _m_hybrid.encode(
+                texts, convert_to_numpy=True, normalize_embeddings=True
+            ).astype(np.float32)
+        print("[robustness] Hybrid: TF-IDF classifier + MiniLM FAISS loaded.\n")
+    except Exception as exc:
+        print(f"[robustness] ERROR: Hybrid FAISS encoder unavailable ({exc}).")
+        # Fallback: OOD similarity check will skip (top_similarity stays 1.0)
+        def _encode_faiss(texts):
+            return np.zeros((len(texts), 1), dtype=np.float32)
 
 # FAISS index — used to compute the top-similarity signal for OOD detection.
 _index = None

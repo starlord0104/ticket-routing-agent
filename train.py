@@ -4,22 +4,32 @@ train.py
 End-to-end training pipeline.
 
 Usage:
-    python train.py                         # MiniLM (default)
-    python train.py --embedding tfidf       # TF-IDF baseline
-    python train.py --force-recompute       # re-embed even if cache exists (minilm)
-    python train.py --threshold 0.80        # override default τ
+    python train.py                          # hybrid (default — recommended)
+    python train.py --embedding tfidf        # TF-IDF classifier + SVD retrieval
+    python train.py --embedding minilm       # MiniLM for both
+    python train.py --force-recompute        # re-embed even if cache exists
+    python train.py --threshold 0.80         # override default τ
+
+Embedding modes
+───────────────
+  hybrid  — TF-IDF classifier (macro-F1 0.86, trains in seconds) +
+             MiniLM FAISS index (category-match@3 0.79, better semantic retrieval).
+             Best of both: right tool for each task.  ← DEFAULT
+
+  tfidf   — TF-IDF for both classifier and FAISS (via TruncatedSVD 128-dim).
+             No internet required. Good baseline.
+
+  minilm  — MiniLM-L6-v2 for both. Weaker classifier (0.81 F1) but consistent
+             embeddings throughout. First run downloads ~80 MB from HuggingFace.
 
 Steps:
   1. Load + clean dataset             (preprocess.py)
-  2. Encode tickets                   (MiniLM via embeddings.py, or TF-IDF+SVD)
+  2. Encode tickets                   (per mode above)
   3. Split train / val / test
   4. Train Logistic Regression        (classifier.py)
   5. Fit temperature scaling on val   (classifier.py)
   6. Save TicketRouter to models/
   7. Build FAISS index on train set   (rag.py)
-
-After this, run:
-    python evaluate.py    ← full metrics + plots
 """
 
 import argparse
@@ -33,7 +43,7 @@ from sklearn.preprocessing import LabelEncoder
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from src.config    import TEST_SIZE, VAL_SIZE, RANDOM_STATE, DEFAULT_THRESHOLD, MODELS_DIR
+from src.config     import TEST_SIZE, VAL_SIZE, RANDOM_STATE, DEFAULT_THRESHOLD, MODELS_DIR
 from src.preprocess import load_dataset
 from src.classifier import train_classifier, fit_temperature, TicketRouter
 from src.rag        import build_index
@@ -42,45 +52,52 @@ from src.rag        import build_index
 def parse_args():
     p = argparse.ArgumentParser(description="Train the ticket routing model.")
     p.add_argument(
-        "--embedding", choices=["tfidf", "minilm"], default="minilm",
-        help="Embedding backend: 'minilm' (MiniLM-L6-v2, default) "
-             "or 'tfidf' (TF-IDF 8k + bigrams baseline).",
+        "--embedding", choices=["hybrid", "tfidf", "minilm"], default="hybrid",
+        help=(
+            "hybrid (default): TF-IDF classifier + MiniLM retrieval. "
+            "tfidf: TF-IDF for both. "
+            "minilm: MiniLM for both."
+        ),
     )
     p.add_argument("--force-recompute", action="store_true",
-                   help="Re-embed even if cache exists (minilm only).")
+                   help="Re-embed even if MiniLM cache exists.")
     p.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD,
                    help=f"Confidence threshold τ (default {DEFAULT_THRESHOLD}).")
     return p.parse_args()
 
 
-def _encode_tfidf(texts: list[str]):
-    """Fit TF-IDF + SVD on the full corpus.
+# ── Encoding helpers ──────────────────────────────────────────────────────────
 
-    Returns
-    -------
-    X_sparse : scipy sparse (N, 8000)  — used for the classifier
-    X_dense  : np.ndarray  (N, 128)   — L2-normalised, used for FAISS
-    tfidf    : fitted TfidfVectorizer
-    svd      : fitted TruncatedSVD
-    """
+def _fit_tfidf(texts: list[str]):
+    """Fit TF-IDF vectoriser. Returns (X_sparse, vectoriser)."""
     from sklearn.feature_extraction.text import TfidfVectorizer
+    print("[train] Fitting TF-IDF (max_features=8 000, bigrams, sublinear_tf) …")
+    vec = TfidfVectorizer(max_features=8_000, ngram_range=(1, 2), sublinear_tf=True)
+    X   = vec.fit_transform(texts)
+    joblib.dump(vec, MODELS_DIR / "tfidf.pkl")
+    print(f"[train] TF-IDF: {X.shape}  nnz={X.nnz:,}")
+    return X, vec
+
+
+def _fit_svd(X_sparse):
+    """Reduce sparse TF-IDF to dense 128-dim for FAISS. Returns (X_dense, svd)."""
     from sklearn.decomposition import TruncatedSVD
     from sklearn.preprocessing import normalize
-
-    print("[train] Fitting TF-IDF (max_features=8 000, unigrams+bigrams, sublinear_tf) …")
-    tfidf = TfidfVectorizer(max_features=8_000, ngram_range=(1, 2), sublinear_tf=True)
-    X_sparse = tfidf.fit_transform(texts)
-    print(f"[train] TF-IDF matrix: {X_sparse.shape}  nnz={X_sparse.nnz:,}")
-
     print("[train] Fitting TruncatedSVD (128 components) for FAISS …")
-    svd = TruncatedSVD(n_components=128, random_state=RANDOM_STATE)
+    svd    = TruncatedSVD(n_components=128, random_state=RANDOM_STATE)
     X_dense = normalize(svd.fit_transform(X_sparse).astype(np.float32), norm="l2")
-    print(f"[train] SVD dense matrix: {X_dense.shape}")
+    joblib.dump(svd, MODELS_DIR / "svd.pkl")
+    print(f"[train] SVD dense: {X_dense.shape}")
+    return X_dense, svd
 
-    joblib.dump(tfidf, MODELS_DIR / "tfidf.pkl")
-    joblib.dump(svd,   MODELS_DIR / "svd.pkl")
-    return X_sparse, X_dense, tfidf, svd
 
+def _load_minilm(texts: list[str], force: bool = False):
+    """Return MiniLM embeddings (uses disk cache after first run)."""
+    from src.embeddings import encode_with_cache
+    return encode_with_cache(texts, force_recompute=force)
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     args = parse_args()
@@ -92,16 +109,24 @@ def main():
     labels = df["label"].tolist()
 
     # ── 2. Encode ─────────────────────────────────────────────────────────────
-    # X      → classifier input  (sparse for tfidf, dense float32 for minilm)
-    # X_rag  → FAISS input       (dense float32, L2-normalised, always)
-    print(f"\n━━  STEP 2 / 5  ─  Encoding tickets [{args.embedding}]  ━━━━━━━━━━━━━━━━━━")
+    # X      → classifier input  (sparse for tfidf/hybrid, dense for minilm)
+    # X_rag  → FAISS input       (always dense float32, L2-normalised)
+    print(f"\n━━  STEP 2 / 5  ─  Encoding [{args.embedding}]  ━━━━━━━━━━━━━━━━━━━━━━━")
 
     if args.embedding == "minilm":
-        from src.embeddings import encode_with_cache
-        X     = encode_with_cache(texts, force_recompute=args.force_recompute)
-        X_rag = X          # same vectors for classifier and FAISS
-    else:  # tfidf
-        X, X_rag, _, _ = _encode_tfidf(texts)
+        X     = _load_minilm(texts, force=args.force_recompute)
+        X_rag = X       # same dense embeddings for classifier and FAISS
+
+    elif args.embedding == "tfidf":
+        X, _     = _fit_tfidf(texts)         # sparse for classifier
+        X_rag, _ = _fit_svd(X)               # dense 128-dim for FAISS
+
+    else:  # hybrid — TF-IDF classifier + MiniLM retrieval
+        print("[train] Hybrid mode: TF-IDF for classifier, MiniLM for FAISS retrieval.")
+        X, _  = _fit_tfidf(texts)            # sparse for classifier
+        X_rag = _load_minilm(texts, force=args.force_recompute)   # dense 384-dim for FAISS
+        print(f"[train] Classifier input: {X.shape} (sparse TF-IDF)")
+        print(f"[train] FAISS input:      {X_rag.shape} (dense MiniLM)")
 
     # ── 3. Encode labels + split ──────────────────────────────────────────────
     print("\n━━  STEP 3 / 5  ─  Splitting data  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -109,7 +134,7 @@ def main():
     y  = le.fit_transform(labels)
     print(f"[train] Classes: {list(le.classes_)}")
 
-    # Split X (classifier) and X_rag (FAISS) together so indices are aligned.
+    # Split X (classifier) and X_rag (FAISS) with the same indices.
     (X_trainval, X_test,
      X_rag_trainval, X_rag_test,
      y_trainval, y_test) = train_test_split(
@@ -118,25 +143,22 @@ def main():
     )
     val_frac = VAL_SIZE / (1 - TEST_SIZE)
     (X_train, X_val,
-     _, X_rag_val,
+     _,       X_rag_val,
      y_train, y_val) = train_test_split(
         X_trainval, X_rag_trainval, y_trainval,
         test_size=val_frac, stratify=y_trainval, random_state=RANDOM_STATE,
     )
-
     print(f"[train] Train: {X_train.shape[0]:,}  "
           f"Val: {X_val.shape[0]:,}  "
           f"Test: {X_test.shape[0]:,}")
 
-    # Save splits so evaluate.py can load pre-computed features.
-    # X_test_rag is always dense float32 — evaluate.py feeds it to FAISS.
     joblib.dump({
-        "X_test":     X_test,      # classifier features (sparse for tfidf)
-        "X_test_rag": X_rag_test,  # FAISS-ready dense features
-        "X_val":      X_val,
-        "X_val_rag":  X_rag_val,
-        "y_test":     y_test,
-        "y_val":      y_val,
+        "X_test":        X_test,       # classifier features
+        "X_test_rag":    X_rag_test,   # FAISS-ready dense features
+        "X_val":         X_val,
+        "X_val_rag":     X_rag_val,
+        "y_test":        y_test,
+        "y_val":         y_val,
         "label_encoder": le,
         "embedding_mode": args.embedding,
     }, MODELS_DIR / "splits.pkl")
@@ -151,7 +173,6 @@ def main():
     print("\n━━  STEP 5 / 5  ─  Calibrating confidence scores  ━━━━━━━━━━━━━━━━")
     temperature = fit_temperature(clf, X_val, y_val)
 
-    # ── Save router ───────────────────────────────────────────────────────────
     router = TicketRouter(
         clf=clf, label_encoder=le,
         temperature=temperature, threshold=args.threshold,
@@ -160,12 +181,11 @@ def main():
 
     # ── Build FAISS index over train+val set ──────────────────────────────────
     print("\n━━  Building RAG index  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    # Re-derive trainval_idx using the same seed so df metadata aligns.
     all_indices  = np.arange(len(texts))
     trainval_idx, _ = train_test_split(
         all_indices, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_STATE,
     )
-    rag_embeddings = X_rag_trainval   # dense, L2-normalised
+    rag_embeddings = X_rag_trainval
     build_index(
         embeddings=rag_embeddings,
         metadata=df.iloc[trainval_idx].reset_index(drop=True),

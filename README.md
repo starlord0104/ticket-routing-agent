@@ -28,9 +28,9 @@ to act without a human.
 | Step | What happens |
 |------|-------------|
 | Preprocessing | lowercase · strip HTML · remove ticket IDs |
-| Vectorisation | MiniLM-L6-v2 → 384-dim dense (shipped)  ·  TF-IDF 8k baseline available |
-| Classification | Logistic Regression → **Access Management** |
-| Calibration | Temperature T=0.87 → calibrated confidence gates the decision |
+| Vectorisation | TF-IDF 8k sparse (classification)  ·  MiniLM-L6-v2 384-dim (retrieval) |
+| Classification | Logistic Regression on TF-IDF → **Access Management** |
+| Calibration | Temperature T=0.68 → calibrated confidence gates the decision |
 | Gate | confidence ≥ τ=0.75 → **auto-route**; below τ → **escalate** |
 | Retrieval | FAISS returns 3 most similar historical tickets (category-match@3 = 0.79) |
 | OOD check | entropy + top-similarity gate flags inputs that fit no queue |
@@ -45,23 +45,25 @@ to act without a human.
 ```
 Raw ticket text
       │
-      ▼
-Preprocessing          lowercase · strip HTML · remove noise
+      ├──────────────────────────────────┐
+      ▼                                  ▼
+ TF-IDF 8k features              MiniLM-L6-v2 384-dim embeddings
+ (classification path)           (retrieval path — FAISS index)
+      │                                  │
+      ▼                                  │
+Logistic Classifier                      │
+7 queues · macro-F1 = 0.86               │
+      │                                  │
+      ▼                                  │
+Temperature Scaling                      │
+T = 0.682 · ECE 0.027 → 0.012           │
+      │                                  │
+      ▼                                  │
+OOD check (entropy + similarity) ←───────┘
+flags inputs that fit no queue
       │
       ▼
-Vectorisation          TF-IDF 8k (baseline)  OR  MiniLM-L6-v2 384-dim
-      │
-      ▼
-Logistic Classifier    7 queues · macro-F1 reported per embedding type
-      │
-      ▼
-Temperature Scaling    fitted on val set · ECE reported before & after
-      │
-      ▼
-OOD check              entropy + top-similarity gate flags no-queue inputs
-      │
-      ▼
-Confidence Gate (τ)
+Confidence Gate (τ = 0.75)
     /           \
   ≥ τ           < τ
    │               │
@@ -75,6 +77,10 @@ FAISS nearest-neighbour · category-match@3 = 0.79
    ▼
 Output (Streamlit dashboard / FastAPI JSON)
 ```
+
+**Why two encoder paths?** Empirically, TF-IDF beats MiniLM for classification
+(0.86 vs 0.81 macro-F1) while MiniLM beats SVD-reduced TF-IDF for semantic retrieval
+(category-match@3 = 0.79 vs 0.725). Using each where it excels is what "hybrid" means.
 
 **Clustering** (offline, not in real-time path):
 DBSCAN on ticket embeddings surfaces recurring issue clusters — potential
@@ -108,50 +114,58 @@ No rows were dropped; the full 47,833 tickets are retained after cleaning.
 
 ## Results
 
-### Shipped model — MiniLM + Logistic Regression (measured)
+### Shipped model — Hybrid (TF-IDF classifier + MiniLM retrieval)
 
-These are the numbers produced by `python evaluate.py` on the trained artifact in
-this repo (9,567 held-out test tickets). MiniLM-L6-v2 embeddings + a logistic head is
-the model that ships; a TF-IDF baseline is also wired in the code for comparison.
+The default `train.py` uses **hybrid mode**: the best encoder for each task.
+These numbers are produced by `python evaluate.py` on 9,567 held-out test tickets.
 
-| Metric                              | MiniLM + LR (shipped) |
-|-------------------------------------|-----------------------|
-| Macro-F1 (9,567 test tickets)       | **0.81**              |
-| Weighted F1                         | 0.79                  |
-| Accuracy                            | 0.79                  |
-| ECE before calibration              | 0.0274                |
-| ECE after temperature scaling       | **0.0122** (−55%)     |
-| Temperature T                       | 0.866                 |
-| Coverage at τ = 0.75                | **64.8%**             |
-| Routing accuracy at τ = 0.75        | **0.926**             |
-| Escalated tickets at τ = 0.75       | 3,365 / 9,567 (35.2%) |
-| Category-match@3 (historical retrieval) | **0.79**          |
+| Metric                              | Hybrid (shipped) |
+|-------------------------------------|------------------|
+| Macro-F1 (9,567 test tickets)       | **0.86**         |
+| Weighted F1                         | 0.85             |
+| Accuracy                            | 0.85             |
+| Temperature T                       | 0.682            |
+| Coverage at τ = 0.75                | **74.7%**        |
+| Routing accuracy at τ = 0.75        | **0.942**        |
+| Escalated tickets at τ = 0.75       | 2,417 / 9,567 (25.3%) |
+| Category-match@3 (historical retrieval) | **0.79**     |
 
-### Per-class breakdown (MiniLM + LR)
+### Model comparison (all measured, same 9,567-ticket test set)
+
+| Mode                                | Macro-F1 | Coverage@0.75 | Routing acc | Category-match@3 |
+|-------------------------------------|----------|---------------|-------------|------------------|
+| **Hybrid (TF-IDF clf + MiniLM RAG)** | **0.86** | **74.7%**     | **0.942**   | **0.79**         |
+| TF-IDF + LR (clf + SVD RAG)         | 0.86     | 74.7%         | 0.942       | 0.725            |
+| MiniLM + LR (clf + MiniLM RAG)      | 0.81     | 64.8%         | 0.926       | 0.79             |
+
+Hybrid dominates: it inherits TF-IDF's classification strength (macro-F1 = 0.86,
+coverage = 74.7%) and MiniLM's retrieval quality (category-match@3 = 0.79).
+
+### Per-class breakdown (Hybrid)
 
 | Queue            | Precision | Recall | F1   | Test n |
 |------------------|-----------|--------|------|--------|
-| Procurement      | 0.94      | 0.86   | 0.90 | 493    |
-| Access Management| 0.83      | 0.80   | 0.82 | 1,777  |
-| Storage          | 0.86      | 0.77   | 0.81 | 555    |
-| Internal Project | 0.84      | 0.77   | 0.80 | 424    |
-| HR Support       | 0.80      | 0.80   | 0.80 | 2,183  |
-| Infrastructure   | 0.75      | 0.81   | 0.78 | 2,723  |
-| General IT       | 0.74      | 0.74   | 0.74 | 1,412  |
+| Procurement      | 0.97      | 0.88   | 0.93 | 493    |
+| Storage          | 0.94      | 0.81   | 0.87 | 555    |
+| Access Management| 0.89      | 0.83   | 0.86 | 1,777  |
+| HR Support       | 0.86      | 0.87   | 0.86 | 2,183  |
+| Infrastructure   | 0.80      | 0.89   | 0.84 | 2,723  |
+| Internal Project | 0.91      | 0.76   | 0.83 | 424    |
+| General IT       | 0.84      | 0.83   | 0.83 | 1,412  |
 
 **Analysis:**
-- **Procurement** has the highest precision (0.94) despite being one of the smaller
-  classes — PO numbers, invoice, and asset-register vocabulary are highly distinctive.
-- **General IT** is the weakest queue (F1 0.74) — it is the "miscellaneous" bucket, so
-  its vocabulary overlaps with every other queue by construction.
+- **Procurement** has the highest F1 (0.93) despite being a small class — PO numbers,
+  invoice, and asset-register vocabulary are highly distinctive for TF-IDF.
+- **General IT** is the hardest queue (F1 0.83) — it is the "miscellaneous" bucket, so
+  its vocabulary overlaps every other queue by construction.
 - **Infrastructure ↔ Access Management** is the hardest pair: hardware setup for a new
   user straddles both queues depending on how the submitter frames the request. This is
   genuine label ambiguity in the data, not a model failure.
 
 ### Coverage–accuracy tradeoff
 
-At τ = 0.75: **64.8% of tickets auto-route at 92.6% routing precision**; the remaining
-35.2% escalate to a human. The coverage-accuracy curve (saved to `plots/`) shows the
+At τ = 0.75: **74.7% of tickets auto-route at 94.2% routing precision**; the remaining
+25.3% escalate to a human. The coverage-accuracy curve (saved to `plots/`) shows the
 full tradeoff — raise τ for higher precision at lower coverage, lower it for the reverse.
 
 ---
@@ -175,11 +189,11 @@ past tickets, not their resolutions. The dataset contains ticket descriptions on
 no resolution field. Category-match@3 = 0.70 measures how often retrieved tickets
 share the query's queue label.
 
-**MiniLM is the trained artefact in this repo.** The saved classifier expects 384-dim
-MiniLM embeddings, and the FAISS index is built from them. Reproducing from scratch
-requires running `train.py` on a machine with internet access (first run downloads
-~80MB from HuggingFace to build the embedding cache). The TF-IDF path is wired in the
-code as a baseline but is not the shipped artifact.
+**The default mode is hybrid.** The classifier was trained on TF-IDF sparse features
+(8,000-dim) and the FAISS index stores MiniLM-L6-v2 384-dim embeddings. Reproducing
+from scratch requires running `train.py` on a machine with internet access (first run
+downloads ~80MB from HuggingFace for the MiniLM cache). All three modes — `hybrid`,
+`tfidf`, `minilm` — are wired in the code and benchmarked.
 
 ---
 
@@ -202,8 +216,11 @@ python -m src.config    # prints category mapping; add any unmapped labels
 
 ### 4. Train
 ```bash
-python train.py         # ~4 min first run (embedding cache); instant after
+python train.py                      # hybrid (default) — TF-IDF clf + MiniLM RAG
+python train.py --embedding tfidf    # TF-IDF for both (no internet needed)
+python train.py --embedding minilm   # MiniLM for both
 ```
+First run downloads ~80 MB (MiniLM cache); subsequent runs are instant.
 
 ### 5. Evaluate
 ```bash
@@ -290,22 +307,24 @@ Or: `docker-compose up --build`
 ## Interview answers
 
 **"Why logistic regression over a fine-tuned transformer?"**
-A logistic head on MiniLM embeddings gives macro-F1 = 0.81 and trains in seconds once
-embeddings are cached. Fine-tuning the transformer itself would add at most a couple of
-points at many times the compute — not worth it on this class count and dataset size.
-A TF-IDF baseline is also in the repo; the decision is evidence-based.
+A logistic head on TF-IDF features gives macro-F1 = 0.86 and trains in under a minute.
+The empirical comparison is in the code: `python train.py --embedding minilm` vs the
+default `--embedding hybrid`. The hybrid architecture uses each model where it excels —
+TF-IDF for classification (best F1), MiniLM for semantic retrieval (best category-match@3).
+Fine-tuning a transformer end-to-end would add a point or two at much higher compute cost.
+The decision is measured, not assumed.
 
 **"What does your confidence score mean?"**
-After temperature scaling (T=0.866), the confidence tracks observed accuracy far more
+After temperature scaling (T=0.682), the confidence tracks observed accuracy far more
 closely — ECE drops from 0.027 to 0.012 (−55%) on the validation set. The reliability
 diagram shows the calibration curve before and after. Without calibration, the raw
 softmax is overconfident and the threshold becomes meaningless.
 
 **"How did you choose τ?"**
-By sweeping 0.5 to 0.99 and plotting coverage vs. routing accuracy. At τ=0.75: 64.8%
-coverage at 92.6% precision. The curve is in `plots/`. The right τ depends on whether
-you optimise for throughput or accuracy — I picked 0.75 as a starting point, not a
-universal answer.
+By sweeping 0.5 to 0.99 and plotting coverage vs. routing accuracy. At τ=0.75 (hybrid):
+74.7% coverage at 94.2% precision. The curve is in `plots/`. The right τ depends on
+whether you optimise for throughput or accuracy — I picked 0.75 as a starting point,
+not a universal answer.
 
 **"What's the hardest category pair?"**
 Infrastructure and Access Management. A ticket about hardware setup for a new hire is

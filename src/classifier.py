@@ -50,9 +50,7 @@ def train_classifier(
         max_iter=1000,
         C=1.0,
         random_state=RANDOM_STATE,
-        n_jobs=-1,
-        multi_class="multinomial",
-        solver="lbfgs",
+        solver="lbfgs",   # lbfgs uses multinomial loss by default (multi_class removed in sklearn 1.5)
     )
     clf.fit(X_train, y_train)
     print(f"[classifier] Training accuracy: {clf.score(X_train, y_train):.4f}")

@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
         _encode_clf   = _encode_minilm   # dense → classifier
         _encode_faiss = _encode_minilm   # same dense → FAISS
 
-    else:  # tfidf
+    elif _embedding_mode == "tfidf":
         from sklearn.preprocessing import normalize as _sk_norm
         _tfidf_v = joblib.load(MODELS_DIR / "tfidf.pkl")
         _svd_v   = joblib.load(MODELS_DIR / "svd.pkl")
@@ -105,6 +105,37 @@ async def lifespan(app: FastAPI):
         print(f"[api] TF-IDF embeddings OK "
               f"(classifier dim={_probe_sparse.shape[1]}, "
               f"FAISS dim={_svd_v.components_.shape[0]}).")
+
+    else:  # hybrid — TF-IDF classifier + MiniLM FAISS retrieval
+        from sklearn.preprocessing import normalize as _sk_norm
+        _tfidf_v = joblib.load(MODELS_DIR / "tfidf.pkl")
+
+        def _encode_clf(texts, show_progress=False):
+            """Sparse TF-IDF features — what the TF-IDF classifier was trained on."""
+            return _tfidf_v.transform(texts)
+
+        try:
+            from src.embeddings import encode as _encode_minilm
+        except Exception as exc:
+            raise RuntimeError(
+                "[api] Hybrid mode requires MiniLM for retrieval but it could not be "
+                f"loaded: {exc}"
+            ) from exc
+
+        def _encode_faiss(texts, show_progress=False):
+            """Dense MiniLM embeddings — what the FAISS index stores (384-dim)."""
+            return _encode_minilm(texts, show_progress=show_progress)
+
+        _probe_sparse = _encode_clf(["probe"])
+        if _probe_sparse.shape[1] != _expected_dim:
+            raise RuntimeError(
+                f"[api] TF-IDF dim mismatch: vectorizer → {_probe_sparse.shape[1]}-dim, "
+                f"classifier expects {_expected_dim}-dim. Re-run train.py."
+            )
+        _probe_dense = _encode_faiss(["probe"])
+        print(f"[api] Hybrid embeddings OK "
+              f"(clf TF-IDF dim={_probe_sparse.shape[1]}, "
+              f"FAISS MiniLM dim={_probe_dense.shape[1]}).")
 
     app.state.encode_clf   = _encode_clf
     app.state.encode_faiss = _encode_faiss
