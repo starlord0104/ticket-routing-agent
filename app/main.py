@@ -54,33 +54,61 @@ async def lifespan(app: FastAPI):
     _temperature = params["temperature"]
     _threshold   = params["threshold"]
 
-    # The classifier was trained on 384-dim MiniLM embeddings.
-    # The old TF-IDF+SVD fallback produced 128-dim vectors — wrong shape,
-    # silent garbage output. Remove it: if MiniLM is unavailable, fail fast
-    # with a clear message rather than serving corrupt predictions.
-    try:
-        from src.embeddings import encode as _encode_minilm
-        _encode_fn = _encode_minilm
-    except Exception as exc:
-        raise RuntimeError(
-            "[api] MiniLM embedding model could not be loaded. "
-            "The classifier expects 384-dim embeddings and has no TF-IDF fallback. "
-            "Ensure 'sentence-transformers' is installed and the model cache is "
-            f"accessible. Original error: {exc}"
-        ) from exc
+    # Determine which embedding backend was used at training time.
+    # encode_clf  → input for the classifier  (sparse for tfidf, dense for minilm)
+    # encode_faiss → input for FAISS search   (always dense float32, L2-normalised)
+    _mode_path = MODELS_DIR / "embedding_mode.pkl"
+    _embedding_mode = joblib.load(_mode_path)["mode"] if _mode_path.exists() else "minilm"
+    print(f"[api] Embedding mode: {_embedding_mode}")
 
-    # Verify the encoder produces vectors the classifier can consume.
-    _probe = _encode_fn(["probe"], show_progress=False)
     _expected_dim = _clf.coef_.shape[1]
-    if _probe.shape[1] != _expected_dim:
-        raise RuntimeError(
-            f"[api] Embedding dim mismatch: encoder → {_probe.shape[1]}-dim, "
-            f"classifier expects {_expected_dim}-dim. "
-            "Re-run train.py to rebuild a consistent set of artifacts."
-        )
-    print(f"[api] MiniLM embeddings OK (dim={_probe.shape[1]}).")
 
-    app.state.encode = _encode_fn
+    if _embedding_mode == "minilm":
+        try:
+            from src.embeddings import encode as _encode_minilm
+        except Exception as exc:
+            raise RuntimeError(
+                "[api] MiniLM embedding model could not be loaded. "
+                "Ensure 'sentence-transformers' is installed and the model cache "
+                f"is accessible. Original error: {exc}"
+            ) from exc
+        _probe = _encode_minilm(["probe"], show_progress=False)
+        if _probe.shape[1] != _expected_dim:
+            raise RuntimeError(
+                f"[api] Embedding dim mismatch: encoder → {_probe.shape[1]}-dim, "
+                f"classifier expects {_expected_dim}-dim. Re-run train.py."
+            )
+        print(f"[api] MiniLM embeddings OK (dim={_probe.shape[1]}).")
+        _encode_clf   = _encode_minilm   # dense → classifier
+        _encode_faiss = _encode_minilm   # same dense → FAISS
+
+    else:  # tfidf
+        from sklearn.preprocessing import normalize as _sk_norm
+        _tfidf_v = joblib.load(MODELS_DIR / "tfidf.pkl")
+        _svd_v   = joblib.load(MODELS_DIR / "svd.pkl")
+
+        def _encode_clf(texts, show_progress=False):
+            """Sparse TF-IDF features — what the classifier was trained on."""
+            return _tfidf_v.transform(texts)
+
+        def _encode_faiss(texts, show_progress=False):
+            """Dense SVD-reduced features — what the FAISS index stores."""
+            X = _tfidf_v.transform(texts)
+            return _sk_norm(_svd_v.transform(X).astype(np.float32), norm="l2")
+
+        _probe_sparse = _encode_clf(["probe"])
+        if _probe_sparse.shape[1] != _expected_dim:
+            raise RuntimeError(
+                f"[api] TF-IDF dim mismatch: vectorizer → {_probe_sparse.shape[1]}-dim, "
+                f"classifier expects {_expected_dim}-dim. Re-run train.py."
+            )
+        print(f"[api] TF-IDF embeddings OK "
+              f"(classifier dim={_probe_sparse.shape[1]}, "
+              f"FAISS dim={_svd_v.components_.shape[0]}).")
+
+    app.state.encode_clf   = _encode_clf
+    app.state.encode_faiss = _encode_faiss
+    app.state.embedding_mode = _embedding_mode
 
     # RAG index
     try:
@@ -140,10 +168,11 @@ class ThresholdRequest(BaseModel):
 @app.get("/health")
 def health():
     return {
-        "status":      "ok",
-        "temperature": _temperature,
-        "threshold":   _threshold,
-        "rag_loaded":  _index is not None,
+        "status":         "ok",
+        "temperature":    _temperature,
+        "threshold":      _threshold,
+        "rag_loaded":     _index is not None,
+        "embedding_mode": getattr(app.state, "embedding_mode", "unknown"),
     }
 
 
@@ -165,11 +194,8 @@ def predict(req: PredictRequest):
     t0  = time.perf_counter()
     tau = req.threshold if req.threshold is not None else _threshold
 
-    # Embed
-    encode = app.state.encode
-    emb = encode([req.text], show_progress=False)            # (1, dim)
-
-    # Classify + calibrate
+    # Embed for classifier (sparse in tfidf mode, dense in minilm mode)
+    emb    = app.state.encode_clf([req.text], show_progress=False)
     logits = _clf.decision_function(emb)
     probs  = softmax(logits / _temperature, axis=1)[0]
     idx    = int(probs.argmax())
@@ -186,16 +212,8 @@ def predict(req: PredictRequest):
     neighbours: list[tuple[int, float]] = []
     top_similarity = 0.0
     if _index is not None:
-        from sklearn.preprocessing import normalize
-        q = emb[0:1].astype(np.float32)
-        # Resize query to match FAISS index dimension if needed
-        if q.shape[1] != _index.d:
-            # MiniLM was used for inference but index was built with SVD
-            # Re-embed with SVD path for retrieval
-            tfidf = joblib.load(MODELS_DIR / "tfidf.pkl")
-            svd   = joblib.load(MODELS_DIR / "svd.pkl")
-            x     = tfidf.transform([req.text])
-            q     = normalize(svd.transform(x).astype(np.float32), norm="l2")
+        # encode_faiss always returns dense float32, L2-normalised — no dim check needed.
+        q = app.state.encode_faiss([req.text], show_progress=False)[0:1].astype(np.float32)
 
         # Vectors are L2-normalised, so the inner-product scores FAISS returns
         # are cosine similarities — use them directly instead of recomputing.

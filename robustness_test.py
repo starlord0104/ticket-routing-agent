@@ -42,25 +42,36 @@ except FileNotFoundError:
     print("[ERROR] No trained model found. Run train.py first.")
     sys.exit(1)
 
-# TF-IDF + SVD path (works without MiniLM)
-_use_minilm   = False
-_minilm_encode = None
+# Determine embedding mode from training artifact — must match what the
+# classifier was trained on, otherwise predictions are meaningless.
+_mode_path = MODELS_DIR / "embedding_mode.pkl"
+_embedding_mode = joblib.load(_mode_path)["mode"] if _mode_path.exists() else "minilm"
+print(f"[robustness] Embedding mode: {_embedding_mode}\n")
 
-# Only use MiniLM if the model is actually cached locally
-try:
-    from sentence_transformers import SentenceTransformer
-    from src.config import EMBEDDING_MODEL
-    _m = SentenceTransformer(EMBEDDING_MODEL, local_files_only=True)
-    def _minilm_encode(texts, **kw):
-        return _m.encode(texts, convert_to_numpy=True, normalize_embeddings=True).astype(np.float32)
-    _use_minilm = True
-    print("[robustness] Using MiniLM embeddings (cached locally)\n")
-except Exception:
-    pass
-
-if not _use_minilm:
-    tfidf = joblib.load(MODELS_DIR / "tfidf.pkl")
-    print("[robustness] Using TF-IDF embeddings (8000-dim sparse)\n")
+if _embedding_mode == "minilm":
+    try:
+        from sentence_transformers import SentenceTransformer
+        from src.config import EMBEDDING_MODEL
+        _m = SentenceTransformer(EMBEDDING_MODEL, local_files_only=True)
+        def _encode_clf(texts):
+            return _m.encode(texts, convert_to_numpy=True, normalize_embeddings=True).astype(np.float32)
+        def _encode_faiss(texts):
+            return _encode_clf(texts)
+        print("[robustness] MiniLM embeddings loaded (cached locally).\n")
+    except Exception as exc:
+        print(f"[robustness] ERROR: MiniLM unavailable ({exc}). "
+              "Run train.py --embedding tfidf to use the TF-IDF model instead.")
+        sys.exit(1)
+else:  # tfidf
+    from sklearn.preprocessing import normalize as _sk_norm
+    _tfidf_v = joblib.load(MODELS_DIR / "tfidf.pkl")
+    _svd_v   = joblib.load(MODELS_DIR / "svd.pkl")
+    def _encode_clf(texts):
+        return _tfidf_v.transform(texts)   # sparse — for classifier
+    def _encode_faiss(texts):
+        X = _tfidf_v.transform(texts)
+        return _sk_norm(_svd_v.transform(X).astype(np.float32), norm="l2")
+    print("[robustness] TF-IDF embeddings loaded.\n")
 
 # FAISS index — used to compute the top-similarity signal for OOD detection.
 _index = None
@@ -73,10 +84,8 @@ except Exception:
 
 
 def embed(text: str):
-    """Return feature matrix compatible with the trained classifier."""
-    if _use_minilm:
-        return _minilm_encode([clean_text(text)])
-    return tfidf.transform([clean_text(text)])
+    """Return feature matrix for the classifier (sparse or dense, per mode)."""
+    return _encode_clf([clean_text(text)])
 
 
 # ── Route helper ───────────────────────────────────────────────────────────────
@@ -89,10 +98,10 @@ def route(text: str) -> dict:
 
     # OOD signal: top cosine similarity to the historical corpus (if indexed).
     top_similarity = 1.0
-    if _index is not None and _use_minilm:
-        q = np.asarray(emb, dtype=np.float32).reshape(1, -1)
-        if q.shape[1] == _index.d:
-            D, _ = _index.search(q, 1)
+    if _index is not None:
+        q_dense = _encode_faiss([clean_text(text)])[0:1].astype(np.float32)
+        if q_dense.shape[1] == _index.d:
+            D, _ = _index.search(q_dense, 1)
             top_similarity = float(D[0][0])
     ood = ood_decision(
         probs, top_similarity,

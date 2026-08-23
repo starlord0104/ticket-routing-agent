@@ -20,6 +20,8 @@ Everything is printed and saved. Open plots/ after running.
 
 import argparse
 import sys
+import matplotlib
+matplotlib.use("Agg")   # headless — no Tk/display needed for saving plots
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -218,10 +220,15 @@ def main():
     router.set_threshold(args.threshold)
     splits  = joblib.load(MODELS_DIR / "splits.pkl")
     le      = splits["label_encoder"]
-    X_test  = splits["X_test"]
+    X_test  = splits["X_test"]      # classifier features (sparse for tfidf)
     y_test  = splits["y_test"]
     X_val   = splits["X_val"]
     y_val   = splits["y_val"]
+    # Dense features for FAISS retrieval eval — always float32, L2-normalised.
+    # Falls back to X_test for MiniLM runs where X_test is already dense.
+    X_test_rag = splits.get("X_test_rag", X_test)
+    embedding_mode = splits.get("embedding_mode", "minilm")
+    print(f"[evaluate] Embedding mode: {embedding_mode}")
 
     classes = list(le.classes_)
 
@@ -271,7 +278,8 @@ def main():
     try:
         retriever   = ResolutionRetriever.load()
         gold_labels = [classes[i] for i in y_test[:500]]   # sample for speed
-        cm3 = category_match_at_k(retriever, X_test[:500], gold_labels)
+        # Use dense RAG embeddings — FAISS needs float32 arrays, not sparse matrices.
+        cm3 = category_match_at_k(retriever, X_test_rag[:500], gold_labels)
         print(f"[evaluate] Category-match@3: {cm3:.4f}")
     except FileNotFoundError:
         print("[evaluate] FAISS index not found — skipping retrieval eval.")
