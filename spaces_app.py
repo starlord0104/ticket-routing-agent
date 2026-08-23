@@ -228,20 +228,20 @@ tab_route, tab_metrics, tab_clusters, tab_monitor = st.tabs(
 # TAB 1 — ROUTE TICKET
 # ══════════════════════════════════════════════════════════════════════════════
 SAMPLES = {
-    "Infrastructure":    "The physical server in rack 3B is showing high temperature alerts. "
-                         "Fans running at maximum speed, CPU throttling detected.",
-    "Access Management": "New hire cannot log into Confluence or Jira after account was created "
-                         "yesterday. SSO is returning a 403 on every attempt.",
-    "Storage":           "Backup job failed overnight. Disk array showing 94% capacity. "
-                         "Log rotation does not appear to be running correctly.",
-    "HR Support":        "Requesting setup of laptop, email account, and VPN credentials "
-                         "for three new interns joining the analytics team next Monday.",
-    "Procurement":       "Please log receipt of PO-20481 — partial shipment of headsets arrived "
-                         "but the invoice shows full quantity. Need reconciliation.",
-    "Internal Project":  "Please amend the task assignments in the Q3 pipeline project. "
-                         "The current owner left the team; reassign to the new lead.",
-    "General IT":        "Please log a restart for the reporting server — it has been "
-                         "unresponsive since this morning. Ref: monitoring alert #3912.",
+    "Infrastructure":    "My laptop screen has gone black and will not turn on. "
+                         "I tried restarting but the machine does not respond at all.",
+    "Access Management": "I need administrator rights on my computer to install the "
+                         "software required for my project. Currently blocked by permissions.",
+    "Storage":           "I am getting an error saying my drive is full and I cannot "
+                         "save any new files. Please help free up disk space.",
+    "HR Support":        "We have a new employee starting on Monday. Please set up their "
+                         "laptop, email account and system access before they arrive.",
+    "Procurement":       "I need to purchase a new laptop. My current one is five years old "
+                         "and too slow for the software I need to run.",
+    "Internal Project":  "Please update the project tracker to mark phase 2 as complete "
+                         "and reassign the phase 3 tasks to the new team lead.",
+    "General IT":        "The office internet has been very slow all morning and I cannot "
+                         "open any web pages or connect to the shared drive.",
 }
 
 with tab_route:
