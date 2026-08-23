@@ -327,12 +327,12 @@ SAMPLES = {
                          "save any new files. Please help free up disk space.",
     "HR Support":        "We have a new employee starting on Monday. Please set up their "
                          "laptop, email account and system access before they arrive.",
-    "Procurement":       "I need to purchase a new laptop. My current one is five years old "
-                         "and too slow for the software I need to run.",
+    "Procurement":       "Please raise a purchase order for five additional monitors and "
+                         "keyboards. We need them for new team members joining next month.",
     "Internal Project":  "Please update the project tracker to mark phase 2 as complete "
                          "and reassign the phase 3 tasks to the new team lead.",
-    "General IT":        "The office internet has been very slow all morning and I cannot "
-                         "open any web pages or connect to the shared drive.",
+    "General IT":        "The printer on the third floor has stopped working. Nobody in "
+                         "the office is able to print any documents today.",
 }
 
 with tab_route:
