@@ -259,14 +259,16 @@ with tab_route:
         )
         st.stop()
 
-    # Pop any queued sample BEFORE rendering the text area so value= picks it up
-    _prefill = st.session_state.pop("_sample", "")
+    # Pop auto-route flag set by quick-example buttons on previous run
+    _auto_route = st.session_state.pop("_auto_route", False)
 
     col_input, col_samples = st.columns([3, 1])
     with col_input:
+        # key= lets us write to session_state["_ticket_text"] from the buttons
+        # below and have the widget pick up the new value immediately on rerun.
         ticket_text = st.text_area(
             "Paste support ticket text",
-            value=_prefill,
+            key="_ticket_text",
             height=140,
             placeholder="Describe the IT issue …",
         )
@@ -274,14 +276,15 @@ with tab_route:
         st.markdown("**Quick examples**")
         for cat in SAMPLES:
             if st.button(cat, use_container_width=True, key=f"sample_{cat}"):
-                st.session_state["_sample"] = SAMPLES[cat]
+                # Writing the widget key directly into session_state overrides
+                # the text area on the very next rerun — value= does not do this.
+                st.session_state["_ticket_text"] = SAMPLES[cat]
+                st.session_state["_auto_route"] = True
                 st.rerun()
 
     submit = st.button("🚀  Route ticket", type="primary", disabled=not ticket_text)
-    # Auto-route immediately when a quick-example button was clicked
-    auto_submit = bool(_prefill)
 
-    if (submit or auto_submit) and ticket_text:
+    if (submit or _auto_route) and ticket_text:
         with st.spinner("Routing …"):
             import time
             t0   = time.perf_counter()
