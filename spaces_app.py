@@ -259,10 +259,14 @@ with tab_route:
         )
         st.stop()
 
+    # Pop any queued sample BEFORE rendering the text area so value= picks it up
+    _prefill = st.session_state.pop("_sample", "")
+
     col_input, col_samples = st.columns([3, 1])
     with col_input:
         ticket_text = st.text_area(
             "Paste support ticket text",
+            value=_prefill,
             height=140,
             placeholder="Describe the IT issue …",
         )
@@ -273,12 +277,11 @@ with tab_route:
                 st.session_state["_sample"] = SAMPLES[cat]
                 st.rerun()
 
-    if "_sample" in st.session_state:
-        ticket_text = st.session_state.pop("_sample")
-
     submit = st.button("🚀  Route ticket", type="primary", disabled=not ticket_text)
+    # Auto-route immediately when a quick-example button was clicked
+    auto_submit = bool(_prefill)
 
-    if submit and ticket_text:
+    if (submit or auto_submit) and ticket_text:
         with st.spinner("Routing …"):
             import time
             t0   = time.perf_counter()
