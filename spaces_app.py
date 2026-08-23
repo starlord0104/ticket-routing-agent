@@ -71,7 +71,49 @@ st.set_page_config(
 )
 
 
-# ── Model loading (cached — runs once per Spaces instance) ─────────────────────
+# HuggingFace repo for the fine-tuned classifier (set after running finetune_colab.py)
+_HF_FINETUNED_REPO = os.getenv("HF_FINETUNED_REPO", "starlord0104/ticket-routing-minilm-finetuned")
+
+# ── Fine-tuned model loader (replaces TF-IDF+LR when available) ────────────
+@st.cache_resource(show_spinner="Loading fine-tuned classifier …")
+def load_finetuned():
+    """
+    Load the fine-tuned MiniLM sequence classifier from HuggingFace.
+    Returns (predict_fn, threshold) where predict_fn(texts) → (categories, confidences, all_probs).
+    Returns None if the repo is not set or unavailable.
+    """
+    if not _HF_FINETUNED_REPO:
+        return None
+    try:
+        import torch
+        from transformers import pipeline as hf_pipeline
+        device = 0 if torch.cuda.is_available() else -1
+        clf_pipe = hf_pipeline(
+            "text-classification",
+            model=_HF_FINETUNED_REPO,
+            top_k=None,          # return all class scores
+            device=device,
+        )
+        params    = joblib.load(MODELS_DIR / "temperature.pkl")
+        threshold = params["threshold"]
+
+        def predict_fn(texts):
+            results = clf_pipe(texts)  # list of list of {label, score}
+            categories, confidences, all_probs = [], [], []
+            for scores in results:
+                sorted_scores = sorted(scores, key=lambda x: x["score"], reverse=True)
+                categories.append(sorted_scores[0]["label"])
+                confidences.append(sorted_scores[0]["score"])
+                all_probs.append({s["label"]: round(s["score"], 4) for s in scores})
+            return categories, confidences, all_probs
+
+        return predict_fn, threshold
+    except Exception as exc:
+        st.warning(f"Fine-tuned model unavailable ({exc}). Falling back to TF-IDF classifier.")
+        return None
+
+
+# ── Legacy model loading (TF-IDF / hybrid / minilm) ──────────────────────
 @st.cache_resource(show_spinner="Loading models …")
 def load_models():
     """
@@ -136,6 +178,54 @@ def _models_present() -> bool:
 
 # ── Core routing function (mirrors /predict logic in app/main.py) ───────────────
 def route_ticket(text: str, tau: float) -> dict:
+    # ── Try fine-tuned model first ────────────────────────────────────────
+    finetuned = load_finetuned()
+    if finetuned is not None:
+        predict_fn, _ = finetuned
+        cats, confs, all_probs_list = predict_fn([text])
+        cat, conf = cats[0], confs[0]
+        class_probs = all_probs_list[0]
+
+        # FAISS retrieval still uses the legacy encoder
+        _, _, _, _, index, meta, _, encode_faiss = load_models()
+
+        top_similarity = 0.0
+        historical: list[dict] = []
+        if index is not None:
+            q    = encode_faiss([text])[0:1].astype(np.float32)
+            D, I = index.search(q, TOP_K + 1)
+            neighbours = [(int(j), float(s)) for j, s in zip(I[0], D[0]) if j >= 0][:TOP_K]
+            if neighbours:
+                top_similarity = neighbours[0][1]
+            if conf >= tau and meta is not None:
+                for rank, (i, sim) in enumerate(neighbours, 1):
+                    row = meta.iloc[i]
+                    historical.append({
+                        "rank": rank, "similarity": round(sim, 4),
+                        "category": str(row["label"]),
+                        "preview": str(row["text"])[:300],
+                    })
+
+        ood_info = ood_decision(
+            np.array(list(class_probs.values())), top_similarity,
+            entropy_threshold=OOD_ENTROPY_THRESHOLD,
+            similarity_threshold=OOD_SIMILARITY_THRESHOLD,
+        )
+
+        return {
+            "category":           cat,
+            "confidence":         round(conf, 4),
+            "escalate":           conf < tau,
+            "threshold_used":     tau,
+            "class_probs":        class_probs,
+            "historical_tickets": historical,
+            "ood":                ood_info["ood"],
+            "entropy":            round(ood_info["entropy"], 4),
+            "ood_reasons":        ood_info["ood_reasons"],
+            "model":              "fine-tuned MiniLM",
+        }
+
+    # ── Fallback: legacy TF-IDF / hybrid classifier ───────────────────────
     clf, le, temperature, _, index, meta, encode_clf, encode_faiss = load_models()
 
     emb    = encode_clf([text])
@@ -180,6 +270,7 @@ def route_ticket(text: str, tau: float) -> dict:
         "ood":               ood_info["ood"],
         "entropy":           round(ood_info["entropy"], 4),
         "ood_reasons":       ood_info["ood_reasons"],
+        "model":             "TF-IDF + LR (hybrid)",
     }
 
 
@@ -327,11 +418,12 @@ with tab_route:
                 "This input may not belong to any of the 7 queues."
             )
 
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4, m5 = st.columns(5)
         m1.metric("Predicted queue",  category)
         m2.metric("Confidence",       f"{conf:.2%}")
         m3.metric("Decision",         "Escalate ⚠️" if escalate else "Auto-route ✅")
         m4.metric("Latency",          f"{data['latency_ms']:.0f} ms")
+        m5.metric("Classifier",       data.get("model", "hybrid"))
 
         st.divider()
         col_l, col_r = st.columns(2)
