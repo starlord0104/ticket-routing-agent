@@ -11,6 +11,7 @@ Run locally:    streamlit run spaces_app.py
 On HF Spaces:   set app_file: spaces_app.py in README.md frontmatter
 """
 
+import os
 import sys
 import warnings
 import joblib
