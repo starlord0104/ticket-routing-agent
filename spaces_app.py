@@ -32,6 +32,35 @@ from src.ood import ood_decision
 from src.audit import log_prediction, log_feedback, compute_kpis
 
 
+# ── Model bootstrap (Streamlit Community Cloud / HF Spaces) ───────────────────
+# If running in the cloud and models/ isn't committed, download them from the
+# HuggingFace model repo specified by the HF_MODEL_REPO env var.
+# Set this in the Streamlit Cloud "Secrets" or as an environment variable:
+#   HF_MODEL_REPO = starlord0104/ticket-routing-models
+_HF_MODEL_REPO = os.getenv("HF_MODEL_REPO", "")
+
+def _maybe_download_models() -> None:
+    """Download models from HuggingFace if MODELS_DIR is empty."""
+    if (MODELS_DIR / "classifier.pkl").exists():
+        return                            # already present — nothing to do
+    if not _HF_MODEL_REPO:
+        return                            # no repo configured — show error in UI
+    try:
+        from huggingface_hub import snapshot_download
+        st.info(f"Downloading model artefacts from `{_HF_MODEL_REPO}` …")
+        snapshot_download(
+            repo_id=_HF_MODEL_REPO,
+            repo_type="model",
+            local_dir=str(Path(__file__).parent),   # downloads models/ and plots/ here
+            ignore_patterns=["*.md", ".gitattributes"],
+        )
+        st.rerun()   # reload page so load_models() picks up the new files
+    except Exception as exc:
+        st.error(f"Model download failed: {exc}")
+
+_maybe_download_models()
+
+
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="IT Ticket Routing System",
