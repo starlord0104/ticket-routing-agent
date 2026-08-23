@@ -325,8 +325,8 @@ SAMPLES = {
                          "I cannot access any of my files or applications.",
     "Storage":           "My drive is full and I cannot save any files. "
                          "I keep getting a disk full error on every save.",
-    "HR Support":        "A new team member is joining us on Monday. Please create "
-                         "their corporate email account and add them to the department group.",
+    "HR Support":        "New hire starting Monday. Please set up their email account "
+                         "and workstation before they arrive on their first day.",
     "Procurement":       "Please raise a purchase order for five additional monitors and "
                          "keyboards. We need them for new team members joining next month.",
     "Internal Project":  "Please reassign the Q3 project tasks to the new team lead "
