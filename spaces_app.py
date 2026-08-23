@@ -321,18 +321,18 @@ tab_route, tab_metrics, tab_clusters, tab_monitor = st.tabs(
 SAMPLES = {
     "Infrastructure":    "My laptop screen has gone black and will not turn on. "
                          "I tried restarting but the machine does not respond at all.",
-    "Access Management": "I need administrator rights on my computer to install the "
-                         "software required for my project. Currently blocked by permissions.",
-    "Storage":           "I am getting an error saying my drive is full and I cannot "
-                         "save any new files. Please help free up disk space.",
-    "HR Support":        "We have a new employee starting on Monday. Please set up their "
-                         "laptop, email account and system access before they arrive.",
+    "Access Management": "I am locked out of my admin account and need a password reset. "
+                         "I cannot access any of my files or applications.",
+    "Storage":           "My drive is full and I cannot save any files. "
+                         "I keep getting a disk full error on every save.",
+    "HR Support":        "We have a new employee starting on Monday. Please set up "
+                         "their email account and system access before they arrive.",
     "Procurement":       "Please raise a purchase order for five additional monitors and "
                          "keyboards. We need them for new team members joining next month.",
-    "Internal Project":  "Please update the project tracker to mark phase 2 as complete "
-                         "and reassign the phase 3 tasks to the new team lead.",
-    "General IT":        "The printer on the third floor has stopped working. Nobody in "
-                         "the office is able to print any documents today.",
+    "Internal Project":  "Please reassign the Q3 project tasks to the new team lead "
+                         "and mark the previous milestones as complete in the tracker.",
+    "General IT":        "The printer on the third floor has stopped working. "
+                         "Nobody in the office is able to print any documents today.",
 }
 
 with tab_route:
