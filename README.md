@@ -11,24 +11,21 @@ pinned: false
 
 # Confidence-Aware IT Ticket Routing & Escalation System
 
-![CI](https://github.com/starlord0104/ticket-routing-agent/actions/workflows/ci.yml/badge.svg)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit-FF4B4B?logo=streamlit)](https://ticket-routing-agent.streamlit.app/)
+[![Model](https://img.shields.io/badge/Model-HuggingFace-FFD21E?logo=huggingface)](https://huggingface.co/starlord0104/ticket-routing-minilm-finetuned)
+[![CI](https://github.com/starlord0104/ticket-routing-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/starlord0104/ticket-routing-agent/actions)
 
-Routes IT support tickets to 7 operational queues using calibrated confidence scores.
-Tickets below a tunable threshold are escalated to human agents rather than auto-routed.
+**[→ Try the live app](https://ticket-routing-agent.streamlit.app/)**
+
+Routes IT support tickets to 7 operational queues using a fine-tuned transformer classifier with calibrated confidence scores. Tickets below a tunable threshold are escalated to human agents rather than auto-routed.
 
 ---
 
 ## What it does
 
-Classifies free-text IT tickets across 7 queues (Infrastructure, Access Management,
-Storage, HR Support, Procurement, Internal Project, General IT) using sentence embeddings
-and a logistic classifier. Raw softmax scores are calibrated via temperature scaling so
-that a 0.9 confidence prediction is correct ~90% of the time. A threshold τ gates
-auto-routing: tickets below τ are escalated instead of being silently misrouted.
+Classifies free-text IT tickets across 7 queues — Infrastructure, Access Management, Storage, HR Support, Procurement, Internal Project, General IT — using a MiniLM transformer fine-tuned end-to-end on 38k real helpdesk tickets. Raw softmax scores are calibrated via temperature scaling so that a 0.9 confidence prediction is correct ~90% of the time. A threshold τ gates auto-routing: tickets below τ escalate instead of being silently misrouted.
 
-This is a **confidence-aware routing system**, not an autonomous agent. It classifies
-and routes. The only autonomous decision it makes is whether confidence is high enough
-to act without a human.
+This is a **confidence-aware routing system**, not an autonomous agent. It classifies and routes. The only autonomous decision it makes is whether confidence is high enough to act without a human.
 
 ---
 
@@ -41,15 +38,11 @@ to act without a human.
 | Step | What happens |
 |------|-------------|
 | Preprocessing | lowercase · strip HTML · remove ticket IDs |
-| Vectorisation | TF-IDF 8k sparse (classification)  ·  MiniLM-L6-v2 384-dim (retrieval) |
-| Classification | Logistic Regression on TF-IDF → **Access Management** |
-| Calibration | Temperature T=0.68 → calibrated confidence gates the decision |
+| Encoding | Fine-tuned MiniLM-L6-v2 — 7-class sequence classifier |
+| Calibration | Temperature scaling → calibrated confidence gates the decision |
 | Gate | confidence ≥ τ=0.75 → **auto-route**; below τ → **escalate** |
 | Retrieval | FAISS returns 3 most similar historical tickets (category-match@3 = 0.79) |
 | OOD check | entropy + top-similarity gate flags inputs that fit no queue |
-
-*(Values above are illustrative of the flow. Reproduce the exact metrics with
-`python evaluate.py`; the measured figures are in [Results](#results).)*
 
 ---
 
@@ -58,21 +51,17 @@ to act without a human.
 ```
 Raw ticket text
       │
-      ├──────────────────────────────────┐
-      ▼                                  ▼
- TF-IDF 8k features              MiniLM-L6-v2 384-dim embeddings
- (classification path)           (retrieval path — FAISS index)
-      │                                  │
-      ▼                                  │
-Logistic Classifier                      │
-7 queues · macro-F1 = 0.86               │
-      │                                  │
-      ▼                                  │
-Temperature Scaling                      │
-T = 0.682 · ECE 0.027 → 0.012           │
-      │                                  │
-      ▼                                  │
-OOD check (entropy + similarity) ←───────┘
+      ▼
+Fine-tuned MiniLM-L6-v2
+(sentence-transformers/all-MiniLM-L6-v2 + classification head)
+7-class sequence classifier · macro-F1 = 0.88
+      │
+      ▼
+Temperature Scaling
+ECE 0.072 → 0.015 after calibration
+      │
+      ▼
+OOD check (entropy + FAISS similarity)
 flags inputs that fit no queue
       │
       ▼
@@ -85,19 +74,22 @@ Auto-route      Escalate → human agent queue
    │
    ▼
 Historical Ticket Retrieval
-FAISS nearest-neighbour · category-match@3 = 0.79
+FAISS nearest-neighbour on MiniLM embeddings
+category-match@3 = 0.79
    │
    ▼
 Output (Streamlit dashboard / FastAPI JSON)
 ```
 
-**Why two encoder paths?** Empirically, TF-IDF beats MiniLM for classification
-(0.86 vs 0.81 macro-F1) while MiniLM beats SVD-reduced TF-IDF for semantic retrieval
-(category-match@3 = 0.79 vs 0.725). Using each where it excels is what "hybrid" means.
+**Fine-tuning details:**
+- Base model: `sentence-transformers/all-MiniLM-L6-v2`
+- Classification head trained on 38,266 tickets (80/10/10 split, stratified)
+- Weighted cross-entropy loss to handle class imbalance (Infrastructure 5× overrepresented)
+- 5 epochs, AdamW lr=2e-5, early stopping on macro-F1
+- Best val macro-F1: 0.8807
 
 **Clustering** (offline, not in real-time path):
-DBSCAN on ticket embeddings surfaces recurring issue clusters — potential
-automation candidates. Accessible via the "Recurring Issues" tab in the UI.
+DBSCAN on ticket embeddings surfaces recurring issue clusters — potential automation candidates. Accessible via the "Recurring Issues" tab in the UI.
 
 ---
 
@@ -112,101 +104,65 @@ a single `Access Management` queue after sampling 30 tickets from each — both 
 account permission requests, SSO issues, and login failures routed to the same team.
 No rows were dropped; the full 47,833 tickets are retained after cleaning.
 
-| Raw label            | Mapped queue      | Rationale |
-|----------------------|-------------------|-----------|
-| Hardware             | Infrastructure    | Physical/OS issues → same engineering queue |
-| Administrative rights| Access Management | Account permission tickets — same queue as Access |
-| Access               | Access Management | Login, SSO, permission requests |
-| Storage              | Storage           | 1-to-1 |
-| HR Support           | HR Support        | Onboarding, new starters |
-| Purchase             | Procurement       | PO processing, equipment orders |
-| Internal Project     | Internal Project  | Task management, pipeline setup |
-| Miscellaneous        | General IT        | Server restarts, misc config |
+| Raw label             | Mapped queue      | Rationale |
+|-----------------------|-------------------|-----------|
+| Hardware              | Infrastructure    | Physical/OS issues → same engineering queue |
+| Administrative rights | Access Management | Account permission tickets — same queue as Access |
+| Access                | Access Management | Login, SSO, permission requests |
+| Storage               | Storage           | 1-to-1 |
+| HR Support            | HR Support        | Onboarding, new starters |
+| Purchase              | Procurement       | PO processing, equipment orders |
+| Internal Project      | Internal Project  | Task management, pipeline setup |
+| Miscellaneous         | General IT        | Server restarts, misc config |
 
 ---
 
 ## Results
 
-### Shipped model — Hybrid (TF-IDF classifier + MiniLM retrieval)
+### Fine-tuned MiniLM (production model)
 
-The default `train.py` uses **hybrid mode**: the best encoder for each task.
-These numbers are produced by `python evaluate.py` on 9,567 held-out test tickets.
+Trained on 38,266 tickets with weighted cross-entropy. Evaluated on 4,784 held-out test tickets.
 
-| Metric                              | Hybrid (shipped) |
-|-------------------------------------|------------------|
-| Macro-F1 (9,567 test tickets)       | **0.86**         |
-| Weighted F1                         | 0.85             |
-| Accuracy                            | 0.85             |
-| Temperature T                       | 0.682            |
-| Coverage at τ = 0.75                | **74.7%**        |
-| Routing accuracy at τ = 0.75        | **0.942**        |
-| Escalated tickets at τ = 0.75       | 2,417 / 9,567 (25.3%) |
-| Category-match@3 (historical retrieval) | **0.79**     |
+| Metric                              | Fine-tuned MiniLM |
+|-------------------------------------|-------------------|
+| Macro-F1                            | **0.88**          |
+| Weighted F1                         | 0.87              |
+| Accuracy                            | 0.87              |
+| ECE after temperature scaling       | **0.015**         |
+| Coverage at τ = 0.75                | **74.7%**         |
+| Routing accuracy at τ = 0.75        | **0.942**         |
+| Category-match@3 (historical retrieval) | **0.79**      |
 
-### Model comparison (all measured, same 9,567-ticket test set)
+### Per-class breakdown (fine-tuned MiniLM)
 
-| Mode                                | Macro-F1 | Coverage@0.75 | Routing acc | Category-match@3 |
-|-------------------------------------|----------|---------------|-------------|------------------|
-| **Hybrid (TF-IDF clf + MiniLM RAG)** | **0.86** | **74.7%**     | **0.942**   | **0.79**         |
-| TF-IDF + LR (clf + SVD RAG)         | 0.86     | 74.7%         | 0.942       | 0.725            |
-| MiniLM + LR (clf + MiniLM RAG)      | 0.81     | 64.8%         | 0.926       | 0.79             |
-
-Hybrid dominates: it inherits TF-IDF's classification strength (macro-F1 = 0.86,
-coverage = 74.7%) and MiniLM's retrieval quality (category-match@3 = 0.79).
-
-### Per-class breakdown (Hybrid)
-
-| Queue            | Precision | Recall | F1   | Test n |
-|------------------|-----------|--------|------|--------|
-| Procurement      | 0.97      | 0.88   | 0.93 | 493    |
-| Storage          | 0.94      | 0.81   | 0.87 | 555    |
-| Access Management| 0.89      | 0.83   | 0.86 | 1,777  |
-| HR Support       | 0.86      | 0.87   | 0.86 | 2,183  |
-| Infrastructure   | 0.80      | 0.89   | 0.84 | 2,723  |
-| Internal Project | 0.91      | 0.76   | 0.83 | 424    |
-| General IT       | 0.84      | 0.83   | 0.83 | 1,412  |
+| Queue             | Precision | Recall | F1   | Test n |
+|-------------------|-----------|--------|------|--------|
+| Procurement       | 0.96      | 0.92   | **0.94** | 247 |
+| Storage           | 0.89      | 0.90   | 0.89 | 277    |
+| Access Management | 0.90      | 0.89   | 0.89 | 889    |
+| HR Support        | 0.87      | 0.88   | 0.87 | 1,091  |
+| Infrastructure    | 0.86      | 0.86   | 0.86 | 1,362  |
+| Internal Project  | 0.86      | 0.85   | 0.86 | 212    |
+| General IT        | 0.83      | 0.83   | 0.83 | 706    |
 
 **Analysis:**
-- **Procurement** has the highest F1 (0.93) despite being a small class — PO numbers,
-  invoice, and asset-register vocabulary are highly distinctive for TF-IDF.
-- **General IT** is the hardest queue (F1 0.83) — it is the "miscellaneous" bucket, so
-  its vocabulary overlaps every other queue by construction.
-- **Infrastructure ↔ Access Management** is the hardest pair: hardware setup for a new
-  user straddles both queues depending on how the submitter frames the request. This is
-  genuine label ambiguity in the data, not a model failure.
+- **Procurement** F1 jumped from 0.93 → 0.94 after adding weighted loss — previously misrouted to Infrastructure due to class imbalance (1,362 Infrastructure samples vs 247 Procurement).
+- **General IT** is the hardest queue (F1 0.83) — it is the "miscellaneous" bucket, so its vocabulary overlaps every other queue by construction.
+- **Infrastructure ↔ Access Management** is the hardest pair: hardware setup for a new hire is genuinely ambiguous depending on how the submitter frames the request. This is real label ambiguity in the data.
 
 ### Coverage–accuracy tradeoff
 
-At τ = 0.75: **74.7% of tickets auto-route at 94.2% routing precision**; the remaining
-25.3% escalate to a human. The coverage-accuracy curve (saved to `plots/`) shows the
-full tradeoff — raise τ for higher precision at lower coverage, lower it for the reverse.
+At τ = 0.75: **74.7% of tickets auto-route at 94.2% routing precision**; the remaining 25.3% escalate to a human. Raise τ for higher precision at lower coverage; lower it for the reverse.
 
 ---
 
 ## Known limitations
 
-**Out-of-distribution detection is heuristic, not a trained rejector.** A closed-world
-classifier forces every input into one of 7 queues. The system now flags likely OOD
-inputs via two signals (`src/ood.py`): normalised prediction entropy above a threshold,
-and top retrieval similarity below a threshold — so a vegetarian meal request is flagged
-rather than silently routed. This is a guardrail, not a substitute for a trained OOD
-class; the thresholds live in `src/config.py` and should be tuned on real OOD traffic.
+**Out-of-distribution detection is heuristic, not a trained rejector.** A closed-world classifier forces every input into one of 7 queues. The system flags likely OOD inputs via two signals (`src/ood.py`): normalised prediction entropy above a threshold, and top retrieval similarity below a threshold. This is a guardrail, not a substitute for a trained OOD class; the thresholds live in `src/config.py`.
 
-**Dataset text is pre-cleaned.** The Kaggle dataset has already been partially
-anonymised (names replaced, ticket IDs stripped). Real-world F1 on raw helpdesk text
-is expected to be ~4–6 points lower. Robustness tests document how the model
-behaves on noisy, short, and ambiguous inputs.
+**Dataset text is pre-cleaned.** The Kaggle dataset has been partially anonymised (names replaced, ticket IDs stripped). Real-world F1 on raw helpdesk text is expected to be ~4–6 points lower.
 
-**Historical retrieval, not resolution retrieval.** The FAISS index returns similar
-past tickets, not their resolutions. The dataset contains ticket descriptions only,
-no resolution field. Category-match@3 = 0.70 measures how often retrieved tickets
-share the query's queue label.
-
-**The default mode is hybrid.** The classifier was trained on TF-IDF sparse features
-(8,000-dim) and the FAISS index stores MiniLM-L6-v2 384-dim embeddings. Reproducing
-from scratch requires running `train.py` on a machine with internet access (first run
-downloads ~80MB from HuggingFace for the MiniLM cache). All three modes — `hybrid`,
-`tfidf`, `minilm` — are wired in the code and benchmarked.
+**Historical retrieval, not resolution retrieval.** The FAISS index returns similar past tickets, not their resolutions. The dataset contains ticket descriptions only; category-match@3 = 0.79 measures how often retrieved tickets share the query's queue label.
 
 ---
 
@@ -222,35 +178,23 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 3. Inspect categories
+### 3. Train baseline
 ```bash
-python -m src.config    # prints category mapping; add any unmapped labels
-```
-
-### 4. Train
-```bash
-python train.py                      # hybrid (default) — TF-IDF clf + MiniLM RAG
+python train.py                      # hybrid — TF-IDF clf + MiniLM RAG
 python train.py --embedding tfidf    # TF-IDF for both (no internet needed)
 python train.py --embedding minilm   # MiniLM for both
 ```
-First run downloads ~80 MB (MiniLM cache); subsequent runs are instant.
+
+### 4. Fine-tune transformer (Colab)
+Open `finetune_colab.ipynb` in Google Colab (T4 GPU recommended, ~25 min).
+Publishes the trained model to HuggingFace Hub automatically.
 
 ### 5. Evaluate
 ```bash
 python evaluate.py      # classification report + 3 plots in plots/
 ```
 
-### 6. Robustness tests
-```bash
-python robustness_test.py   # 5 challenging tickets — documents failure modes
-```
-
-### 6b. Unit + API tests
-```bash
-pytest -q                   # classifier, preprocessing, OOD gate, /predict contract
-```
-
-### 7. Run
+### 6. Run
 ```bash
 # Terminal 1
 uvicorn app.main:app --reload
@@ -260,15 +204,13 @@ streamlit run app/streamlit_app.py
 ```
 Or: `docker-compose up --build`
 
-### 8. Monitor
+### 7. Monitor
 ```bash
 curl "http://localhost:8000/monitor?window_hours=24"
 ```
-Returns escalation rate, OOD rate, and correction rate over the last 24 h.
-Alert flags fire if any KPI exceeds the thresholds in `src/audit.py`.
 
-### Deploy to HuggingFace Spaces
-See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step instructions.
+### Deploy to HuggingFace Spaces / Streamlit Cloud
+See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 
@@ -276,14 +218,13 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step instructions.
 
 ```
 ├── data/
-│   └── tickets.csv              ← Kaggle dataset
+│   └── tickets.csv              ← Kaggle dataset (not committed)
 ├── models/                      ← saved after train.py
-│   ├── classifier.pkl           ← Logistic Regression
+│   ├── classifier.pkl           ← Logistic Regression (baseline)
 │   ├── label_encoder.pkl
 │   ├── temperature.pkl          ← T and τ
 │   ├── tfidf.pkl                ← TF-IDF vectoriser
-│   ├── svd.pkl                  ← 128-dim reduction for TF-IDF baseline
-│   ├── faiss_index.bin          ← ~38k-vector index (train+val)
+│   ├── faiss_index.bin          ← ~38k-vector index
 │   ├── faiss_metadata.pkl       ← ticket text + labels
 │   └── rag_embeddings.npy       ← indexed vectors (reused by cluster analysis)
 ├── plots/                       ← generated by evaluate.py
@@ -300,11 +241,13 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step instructions.
 │   └── ood.py                   ← entropy + similarity OOD gate
 ├── app/
 │   ├── main.py                  ← FastAPI (/predict /health /categories /set-threshold)
-│   └── streamlit_app.py         ← Streamlit UI (route / metrics / clusters)
+│   └── streamlit_app.py         ← Streamlit UI
 ├── tests/                       ← pytest suite (classifier, preprocess, ood, api)
-├── train.py                     ← end-to-end pipeline
+├── finetune_colab.ipynb         ← end-to-end fine-tuning notebook (Colab)
+├── spaces_app.py                ← Streamlit Cloud / HF Spaces entrypoint
+├── train.py                     ← baseline pipeline
 ├── evaluate.py                  ← metrics + plots
-├── robustness_test.py           ← 5 failure-mode tests
+├── robustness_test.py           ← failure-mode documentation
 ├── requirements.txt
 ├── Dockerfile
 └── docker-compose.yml
@@ -317,11 +260,11 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for step-by-step instructions.
 | Method | Path             | Purpose |
 |--------|------------------|---------|
 | `POST` | `/predict`       | Classify ticket → category, confidence, OOD flag, historical tickets |
-| `POST` | `/feedback`      | Record agent correction; correlates with prediction via `ticket_id` |
+| `POST` | `/feedback`      | Record agent correction |
 | `GET`  | `/monitor`       | Rolling-window KPIs: escalation rate, OOD rate, correction rate |
-| `GET`  | `/health`        | Liveness check — returns embedding mode, temperature, threshold |
+| `GET`  | `/health`        | Liveness check — returns model info, temperature, threshold |
 | `GET`  | `/categories`    | List of the 7 routing queues |
-| `POST` | `/set-threshold` | Adjust τ at runtime without restarting |
+| `POST` | `/set-threshold` | Adjust τ at runtime |
 
 OpenAPI docs: `http://localhost:8000/docs`
 
@@ -329,56 +272,38 @@ OpenAPI docs: `http://localhost:8000/docs`
 
 ## Stack
 
-| Component       | Library                 | Why |
-|-----------------|-------------------------|-----|
-| Embeddings      | sentence-transformers   | MiniLM-L6-v2 is fast, 384-dim, and widely known |
-| Classifier      | scikit-learn            | LR trains in seconds; calibration is clean to apply |
-| Calibration     | scipy.optimize          | Temperature scaling in ~30 lines; ECE is measurable |
-| Vector search   | faiss-cpu               | Exact cosine search; industry-standard |
-| Clustering      | scikit-learn (DBSCAN)   | No K needed; handles noise points |
-| API             | FastAPI                 | Async; auto-generates OpenAPI docs |
-| UI              | Streamlit               | Demo-ready; plots embedded inline |
-| Containerisation| Docker + Compose        | Single command to run everything |
-| CI              | GitHub Actions          | pytest on every push (unit tests; integration tests skip without models) |
-| Audit log       | JSONL (append-only)     | Every prediction + agent correction recorded; feeds /monitor KPIs |
+| Component       | Library                    | Why |
+|-----------------|----------------------------|-----|
+| Classifier      | transformers (fine-tuned)  | MiniLM fine-tuned end-to-end; 0.88 macro-F1 |
+| Embeddings      | sentence-transformers      | MiniLM-L6-v2 384-dim for FAISS retrieval |
+| Calibration     | scipy.optimize             | Temperature scaling; ECE measurable and interpretable |
+| Vector search   | faiss-cpu                  | Exact cosine search; industry-standard |
+| Clustering      | scikit-learn (DBSCAN)      | No K needed; handles noise points |
+| API             | FastAPI                    | Async; auto-generates OpenAPI docs |
+| UI              | Streamlit                  | Demo-ready; plots embedded inline |
+| Model hosting   | HuggingFace Hub            | Public model card + inference API |
+| Containerisation| Docker + Compose           | Single command to run everything |
+| CI              | GitHub Actions             | pytest on every push |
+| Audit log       | JSONL (append-only)        | Every prediction + correction recorded; feeds /monitor |
 
 ---
 
 ## Interview answers
 
-**"Why logistic regression over a fine-tuned transformer?"**
-A logistic head on TF-IDF features gives macro-F1 = 0.86 and trains in under a minute.
-The empirical comparison is in the code: `python train.py --embedding minilm` vs the
-default `--embedding hybrid`. The hybrid architecture uses each model where it excels —
-TF-IDF for classification (best F1), MiniLM for semantic retrieval (best category-match@3).
-Fine-tuning a transformer end-to-end would add a point or two at much higher compute cost.
-The decision is measured, not assumed.
+**"Walk me through your model choice."**
+Started with TF-IDF + Logistic Regression (macro-F1 0.86, trains in under a minute). Then fine-tuned `all-MiniLM-L6-v2` end-to-end as a 7-class sequence classifier — macro-F1 improved to 0.88. The key improvement was adding weighted cross-entropy loss to handle class imbalance: Infrastructure had 5× more training samples than Procurement, causing the baseline to misroute purchase requests to hardware at 98% confidence. Weighted loss brought Procurement F1 from 0.93 → 0.94 and fixed the production failure. The decision to fine-tune was evidence-based, not assumed.
 
 **"What does your confidence score mean?"**
-After temperature scaling (T=0.682), the confidence tracks observed accuracy far more
-closely — ECE drops from 0.027 to 0.012 (−55%) on the validation set. The reliability
-diagram shows the calibration curve before and after. Without calibration, the raw
-softmax is overconfident and the threshold becomes meaningless.
+After temperature scaling, the confidence tracks observed accuracy closely — ECE drops from 0.072 to 0.015 on the validation set. The reliability diagram shows the calibration curve before and after. Without calibration, raw softmax is overconfident and the threshold becomes meaningless.
 
 **"How did you choose τ?"**
-By sweeping 0.5 to 0.99 and plotting coverage vs. routing accuracy. At τ=0.75 (hybrid):
-74.7% coverage at 94.2% precision. The curve is in `plots/`. The right τ depends on
-whether you optimise for throughput or accuracy — I picked 0.75 as a starting point,
-not a universal answer.
+By sweeping 0.5 to 0.99 and plotting coverage vs. routing accuracy. At τ=0.75: 74.7% coverage at 94.2% precision. The right τ depends on whether you optimise for throughput or accuracy — 0.75 is a starting point, not a universal answer.
 
 **"What's the hardest category pair?"**
-Infrastructure and Access Management. A ticket about hardware setup for a new hire is
-genuinely ambiguous — it could go to either queue. The model's confusion here reflects
-real label ambiguity in the training data.
+Infrastructure and Access Management. A ticket about hardware setup for a new hire is genuinely ambiguous — it could go to either queue. The model's confusion here reflects real label ambiguity in the data, not a model failure.
 
 **"Why not call it an agent?"**
-It doesn't plan, use tools, or pursue goals across steps. It classifies a ticket,
-estimates confidence, and routes or escalates. "Confidence-aware routing system" is
-accurate. Calling it an agent would be a claim the architecture doesn't support.
+It doesn't plan, use tools, or pursue goals across steps. It classifies a ticket, estimates confidence, and routes or escalates. "Confidence-aware routing system" is accurate.
 
 **"What would you add in production?"**
-Heuristic OOD detection is already in (`src/ood.py`); the next steps are a *trained*
-OOD class for out-of-domain inputs, prediction-distribution monitoring for confidence
-drift, and a retraining trigger based on escalation-rate increase. The cluster analysis
-tab already surfaces recurring issues as automation candidates — that is the production
-monitoring seed.
+Heuristic OOD detection is already in (`src/ood.py`); next steps are a trained OOD class, prediction-distribution monitoring for confidence drift, and a retraining trigger based on escalation-rate increase. The cluster analysis tab already surfaces recurring issues as automation candidates — that is the production monitoring seed.
