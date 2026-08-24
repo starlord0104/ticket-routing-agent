@@ -1,6 +1,5 @@
 """
 train.py
-────────
 End-to-end training pipeline.
 
 Usage:
@@ -10,8 +9,7 @@ Usage:
     python train.py --force-recompute        # re-embed even if cache exists
     python train.py --threshold 0.80         # override default τ
 
-Embedding modes
-───────────────
+Embedding modes:
   hybrid  — TF-IDF classifier (macro-F1 0.86, trains in seconds) +
              MiniLM FAISS index (category-match@3 0.79, better semantic retrieval).
              Best of both: right tool for each task.  ← DEFAULT
@@ -39,7 +37,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-# Windows consoles default to cp1252 — force UTF-8 for the box-drawing banners.
+# Windows consoles default to cp1252 — force UTF-8 output.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -66,7 +64,7 @@ def parse_args():
     return p.parse_args()
 
 
-# ── Encoding helpers ──────────────────────────────────────────────────────────
+# encoding helpers
 
 def _fit_tfidf(texts: list[str]):
     """Fit TF-IDF vectoriser. Returns (X_sparse, vectoriser)."""
@@ -97,21 +95,21 @@ def _load_minilm(texts: list[str], force: bool = False):
     return encode_with_cache(texts, force_recompute=force)
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# main
 
 def main():
     args = parse_args()
 
-    # ── 1. Load dataset ───────────────────────────────────────────────────────
-    print("\n━━  STEP 1 / 5  ─  Loading dataset  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    # 1. load dataset
+    print("[train] step 1/5: loading dataset")
     df     = load_dataset(verbose=True)
     texts  = df["text"].tolist()
     labels = df["label"].tolist()
 
-    # ── 2. Encode ─────────────────────────────────────────────────────────────
+    # 2. encode
     # X      → classifier input  (sparse for tfidf/hybrid, dense for minilm)
     # X_rag  → FAISS input       (always dense float32, L2-normalised)
-    print(f"\n━━  STEP 2 / 5  ─  Encoding [{args.embedding}]  ━━━━━━━━━━━━━━━━━━━━━━━")
+    print(f"[train] step 2/5: encoding [{args.embedding}]")
 
     if args.embedding == "minilm":
         X     = _load_minilm(texts, force=args.force_recompute)
@@ -128,8 +126,8 @@ def main():
         print(f"[train] Classifier input: {X.shape} (sparse TF-IDF)")
         print(f"[train] FAISS input:      {X_rag.shape} (dense MiniLM)")
 
-    # ── 3. Encode labels + split ──────────────────────────────────────────────
-    print("\n━━  STEP 3 / 5  ─  Splitting data  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    # 3. encode labels + split
+    print("[train] step 3/5: splitting data")
     le = LabelEncoder()
     y  = le.fit_transform(labels)
     print(f"[train] Classes: {list(le.classes_)}")
@@ -165,12 +163,12 @@ def main():
     joblib.dump({"mode": args.embedding}, MODELS_DIR / "embedding_mode.pkl")
     print(f"[train] Saved splits → models/splits.pkl  (mode={args.embedding})")
 
-    # ── 4. Train classifier ───────────────────────────────────────────────────
-    print("\n━━  STEP 4 / 5  ─  Training classifier  ━━━━━━━━━━━━━━━━━━━━━━━━━")
+    # 4. train classifier
+    print("[train] step 4/5: training classifier")
     clf = train_classifier(X_train, y_train)
 
-    # ── 5. Calibrate ──────────────────────────────────────────────────────────
-    print("\n━━  STEP 5 / 5  ─  Calibrating confidence scores  ━━━━━━━━━━━━━━━━")
+    # 5. calibrate
+    print("[train] step 5/5: calibrating confidence scores")
     temperature = fit_temperature(clf, X_val, y_val)
 
     router = TicketRouter(
@@ -179,8 +177,8 @@ def main():
     )
     router.save()
 
-    # ── Build FAISS index over train+val set ──────────────────────────────────
-    print("\n━━  Building RAG index  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    # build faiss index over train+val set
+    print("[train] building RAG index")
     all_indices  = np.arange(len(texts))
     trainval_idx, _ = train_test_split(
         all_indices, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_STATE,
@@ -193,7 +191,7 @@ def main():
     np.save(MODELS_DIR / "rag_embeddings.npy", rag_embeddings)
     print(f"[train] Saved RAG embeddings → models/rag_embeddings.npy {rag_embeddings.shape}")
 
-    print(f"\n✓  Training complete [{args.embedding}].  Run  python evaluate.py  for metrics.\n")
+    print(f"\n[train] done [{args.embedding}]. run python evaluate.py for metrics.\n")
 
 
 if __name__ == "__main__":

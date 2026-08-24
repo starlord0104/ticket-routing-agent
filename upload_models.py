@@ -1,6 +1,5 @@
 """
 upload_models.py
-────────────────
 Upload trained model artefacts to a HuggingFace repository so the live
 demo (Streamlit Community Cloud) can download them at startup.
 
@@ -100,7 +99,7 @@ def main():
         print("done")
         uploaded += 1
 
-    print(f"\n✓  Uploaded {uploaded} files, skipped {skipped}.")
+    print(f"\n[upload] done: {uploaded} uploaded, {skipped} skipped.")
     hf_url = f"https://huggingface.co/{rtype}s/{repo}"
     print(f"   Repo: {hf_url}\n")
     if rtype in ("model", "dataset"):

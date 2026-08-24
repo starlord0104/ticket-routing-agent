@@ -1,12 +1,11 @@
 """
 rag.py
-──────
 FAISS index over resolved tickets for resolution retrieval.
 
 This is NOT generation — it's retrieval-only, which means every suggestion
 is a real resolution that worked before. That makes it:
   • Traceable  (link back to source ticket)
-  • Explainable in interviews ("no hallucination; it only shows real past fixes")
+  • Explainable (no hallucination; it only shows real past fixes)
   • Evaluable  (precision@k is a clean metric)
 
 Architecture:
@@ -31,7 +30,7 @@ _INDEX_PATH = MODELS_DIR / "faiss_index.bin"
 _META_PATH  = MODELS_DIR / "faiss_metadata.pkl"
 
 
-# ── Building the index ─────────────────────────────────────────────────────────
+# building the index
 
 def build_index(
     embeddings: np.ndarray,
@@ -67,7 +66,7 @@ def load_index(
     return index, metadata
 
 
-# ── Retrieval ──────────────────────────────────────────────────────────────────
+# retrieval
 
 class ResolutionRetriever:
     """Retrieves the top-K most similar past tickets for a query."""
@@ -148,7 +147,7 @@ class ResolutionRetriever:
         return normalize(x_svd, norm="l2")[0]
 
 
-# ── Evaluation ─────────────────────────────────────────────────────────────────
+# evaluation
 
 def category_match_at_k(
     retriever:        ResolutionRetriever,

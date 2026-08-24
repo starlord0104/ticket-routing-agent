@@ -1,6 +1,5 @@
 """
 preprocess.py
-─────────────
 Text cleaning pipeline for IT support tickets.
 
 All transformations are deterministic (no model calls) so this runs
@@ -16,7 +15,7 @@ from src.config import (
 )
 
 
-# ── Cleaning helpers ──────────────────────────────────────────────────────────
+# cleaning helpers
 
 _HTML_TAG    = re.compile(r"<[^>]+>")
 _URL         = re.compile(r"https?://\S+|www\.\S+")
@@ -43,7 +42,7 @@ def clean_text(text: str) -> str:
     return t
 
 
-# ── Label mapping ─────────────────────────────────────────────────────────────
+# label mapping
 
 def map_label(raw: str) -> str | None:
     """Map a raw Topic_group value → one of the 7 spec categories.
@@ -67,7 +66,7 @@ def map_label(raw: str) -> str | None:
     return None
 
 
-# ── Dataset loader ────────────────────────────────────────────────────────────
+# dataset loader
 
 def load_dataset(csv_path=None, verbose: bool = True) -> pd.DataFrame:
     """Load, clean, and label-map the raw CSV.

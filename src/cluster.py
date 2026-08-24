@@ -1,6 +1,5 @@
 """
 cluster.py
-──────────
 DBSCAN clustering over embeddings to detect repeated issues.
 
 Use case: when the same underlying problem causes many tickets (e.g. VPN
@@ -104,10 +103,10 @@ def describe_clusters(cluster_df: pd.DataFrame, top_n: int = 5) -> None:
     flagged = get_automation_candidates(cluster_df)
     if flagged.empty:
         return
-    print("\n── Automation Candidates ─────────────────────────────────────")
+    print("\n[cluster] automation candidates:")
     for _, row in flagged.head(top_n).iterrows():
         print(f"\nCluster {int(row['cluster_id'])}  |  "
               f"Size: {int(row['size'])}  |  "
               f"Top category: {row['top_label']}")
         print(f"  Sample: {row['sample_text'][:120]} …")
-    print("──────────────────────────────────────────────────────────────")
+    print("")

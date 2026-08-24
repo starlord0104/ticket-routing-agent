@@ -1,6 +1,5 @@
 """
 spaces_app.py
-─────────────
 Standalone Streamlit app for HuggingFace Spaces.
 
 Identical UI to app/streamlit_app.py, but routing logic is called directly
@@ -33,7 +32,7 @@ from src.ood import ood_decision
 from src.audit import log_prediction, log_feedback, compute_kpis
 
 
-# ── Model bootstrap (Streamlit Community Cloud / HF Spaces) ───────────────────
+# model bootstrap (Streamlit Community Cloud / HF Spaces)
 # If running in the cloud and models/ isn't committed, download them from the
 # HuggingFace model repo specified by the HF_MODEL_REPO env var.
 # Set this in the Streamlit Cloud "Secrets" or as an environment variable:
@@ -62,7 +61,7 @@ def _maybe_download_models() -> None:
 _maybe_download_models()
 
 
-# ── Page config ────────────────────────────────────────────────────────────────
+# page config
 st.set_page_config(
     page_title="IT Ticket Routing System",
     page_icon="🎫",
@@ -74,7 +73,7 @@ st.set_page_config(
 # HuggingFace repo for the fine-tuned classifier (set after running finetune_colab.py)
 _HF_FINETUNED_REPO = os.getenv("HF_FINETUNED_REPO", "starlord0104/ticket-routing-minilm-finetuned")
 
-# ── Fine-tuned model loader (replaces TF-IDF+LR when available) ────────────
+# fine-tuned model loader (replaces TF-IDF+LR when available)
 @st.cache_resource(show_spinner="Loading fine-tuned classifier …")
 def load_finetuned():
     """
@@ -113,7 +112,7 @@ def load_finetuned():
         return None
 
 
-# ── Legacy model loading (TF-IDF / hybrid / minilm) ──────────────────────
+# legacy model loading (TF-IDF / hybrid / minilm)
 @st.cache_resource(show_spinner="Loading models …")
 def load_models():
     """
@@ -176,9 +175,9 @@ def _models_present() -> bool:
     return (MODELS_DIR / "classifier.pkl").exists()
 
 
-# ── Core routing function (mirrors /predict logic in app/main.py) ───────────────
+# core routing function (mirrors /predict logic in app/main.py)
 def route_ticket(text: str, tau: float) -> dict:
-    # ── Try fine-tuned model first ────────────────────────────────────────
+    # try fine-tuned model first
     finetuned = load_finetuned()
     if finetuned is not None:
         predict_fn, _ = finetuned
@@ -225,7 +224,7 @@ def route_ticket(text: str, tau: float) -> dict:
             "model":              "fine-tuned MiniLM",
         }
 
-    # ── Fallback: legacy TF-IDF / hybrid classifier ───────────────────────
+    # fallback: legacy TF-IDF / hybrid classifier
     clf, le, temperature, _, index, meta, encode_clf, encode_faiss = load_models()
 
     emb    = encode_clf([text])
@@ -274,7 +273,7 @@ def route_ticket(text: str, tau: float) -> dict:
     }
 
 
-# ── Sidebar ────────────────────────────────────────────────────────────────────
+# sidebar
 with st.sidebar:
     st.markdown("## ⚙️ Settings")
     tau = st.slider(
@@ -309,15 +308,13 @@ with st.sidebar:
         st.error("Models not found. Run `python train.py` then commit the `models/` directory.")
 
 
-# ── Tabs ───────────────────────────────────────────────────────────────────────
+# tabs
 tab_route, tab_metrics, tab_clusters, tab_monitor = st.tabs(
     ["🎫 Route Ticket", "📊 System Metrics", "🔁 Recurring Issues", "📈 Monitor"]
 )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — ROUTE TICKET
-# ══════════════════════════════════════════════════════════════════════════════
+# tab 1 — route ticket
 SAMPLES = {
     "Infrastructure":    "My laptop screen has gone black and will not turn on. "
                          "I tried restarting but the machine does not respond at all.",
@@ -380,7 +377,7 @@ with tab_route:
             data = route_ticket(ticket_text, tau)
             data["latency_ms"] = round((time.perf_counter() - t0) * 1000, 1)
 
-        # Audit log (best-effort; never blocks the UI)
+        # audit log
         try:
             import uuid
             log_prediction(
@@ -484,9 +481,7 @@ with tab_route:
         st.plotly_chart(gauge, use_container_width=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 2 — SYSTEM METRICS
-# ══════════════════════════════════════════════════════════════════════════════
+# tab 2 — system metrics
 with tab_metrics:
     st.markdown("## System metrics  (fine-tuned MiniLM — measured on 4,784 held-out test tickets)")
 
@@ -524,9 +519,7 @@ with tab_metrics:
     st.dataframe(per_class.set_index("Queue"), use_container_width=True)
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — RECURRING ISSUES (DBSCAN)
-# ══════════════════════════════════════════════════════════════════════════════
+# tab 3 — recurring issues
 with tab_clusters:
     st.markdown("## Recurring issue detection")
     st.caption(
@@ -572,9 +565,7 @@ with tab_clusters:
                         st.markdown(f"**Sample:** {row['sample_text'][:300]}")
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# TAB 4 — MONITOR
-# ══════════════════════════════════════════════════════════════════════════════
+# tab 4 — monitor
 with tab_monitor:
     st.markdown("## Live monitoring")
     st.caption(

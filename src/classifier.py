@@ -1,14 +1,11 @@
 """
 classifier.py
-─────────────
 Logistic Regression on sentence embeddings + Temperature Scaling calibration.
 
-Why Logistic Regression (not a fine-tuned transformer)?
+Why Logistic Regression:
   • Trains in seconds once embeddings are computed
   • Easy to inspect (coefficients, feature importance via projection)
   • Calibration is straightforward to apply and explain
-  • Interviewers appreciate the deliberate choice: "I benchmarked against
-    a fine-tuned model; the F1 gap was 2 points at 6× the training cost."
 
 Temperature Scaling (Guo et al., 2017):
   Fits a single scalar T on a validation set by minimising NLL.
@@ -32,13 +29,13 @@ from src.config import (
 )
 
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# paths
 _CLF_PATH    = MODELS_DIR / "classifier.pkl"
 _ENCODER_PATH = MODELS_DIR / "label_encoder.pkl"
 _TEMP_PATH   = MODELS_DIR / "temperature.pkl"
 
 
-# ── Training ───────────────────────────────────────────────────────────────────
+# training
 
 def train_classifier(
     X_train: np.ndarray,
@@ -62,7 +59,7 @@ def get_logits(clf: LogisticRegression, X: np.ndarray) -> np.ndarray:
     return clf.decision_function(X)
 
 
-# ── Temperature Scaling ────────────────────────────────────────────────────────
+# temperature scaling
 
 def _nll_loss(T: float, logits: np.ndarray, labels: np.ndarray) -> float:
     """Negative log-likelihood with temperature T (scalar to minimise)."""
@@ -99,7 +96,7 @@ def fit_temperature(
     return float(T_opt)
 
 
-# ── Inference ──────────────────────────────────────────────────────────────────
+# inference
 
 def predict_proba_calibrated(
     clf: LogisticRegression,
@@ -156,7 +153,7 @@ class TicketRouter:
             })
         return results
 
-    # ── Persistence ────────────────────────────────────────────────────────────
+    # persistence
 
     def save(
         self,

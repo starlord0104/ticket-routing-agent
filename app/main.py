@@ -1,6 +1,5 @@
 """
 app/main.py
-───────────
 FastAPI backend for the Confidence-Aware IT Ticket Routing & Escalation System.
 
 Endpoints:
@@ -34,7 +33,7 @@ from src.ood   import ood_decision
 from src.audit import log_prediction, log_feedback, compute_kpis
 
 
-# ── State ──────────────────────────────────────────────────────────────────────
+# state
 _clf         = None
 _le          = None
 _index       = None
@@ -168,7 +167,7 @@ app = FastAPI(
 )
 
 
-# ── Schemas ────────────────────────────────────────────────────────────────────
+# schemas
 
 class PredictRequest(BaseModel):
     text:      str   = Field(..., min_length=5, max_length=5000)
@@ -213,7 +212,7 @@ class ThresholdRequest(BaseModel):
     threshold: float = Field(..., ge=0.0, le=1.0)
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
+# endpoints
 
 @app.get("/health")
 def health():

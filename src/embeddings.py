@@ -1,6 +1,5 @@
 """
 embeddings.py
-─────────────
 Thin wrapper around sentence-transformers. Handles batching, caching,
 and exposes a single encode() function used throughout the project.
 

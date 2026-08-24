@@ -1,6 +1,6 @@
 from pathlib import Path
 
-# ── Paths ──────────────────────────────────────────────────────────────────
+# paths
 BASE_DIR       = Path(__file__).parent.parent
 DATA_DIR       = BASE_DIR / "data"
 MODELS_DIR     = BASE_DIR / "models"
@@ -11,13 +11,13 @@ for _d in (DATA_DIR, MODELS_DIR, PLOTS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 # logs/ is created on first write by audit.py — no need to mkdir here.
 
-# ── Dataset columns ─────────────────────────────────────────────────────────
+# dataset columns
 # These match the Kaggle IT Service Ticket Classification Dataset.
 # If you use a different CSV, change these two strings.
 TEXT_COLUMN  = "Document"
 LABEL_COLUMN = "Topic_group"
 
-# ── Category mapping ────────────────────────────────────────────────────────
+# category mapping
 # Derived from EDA of the actual dataset (all_tickets_processed_improved_v3.csv).
 # Raw labels → 7 routing targets. Zero rows dropped.
 #
@@ -42,10 +42,7 @@ CATEGORY_MAP: dict[str, str] = {
     "Miscellaneous":        "General IT",
 }
 
-# The 7 routing targets — derived from the actual data, not the spec skeleton.
-# Interview note: "The dataset had 8 raw categories; I merged two overlapping
-# access-related labels into one queue after sampling ticket text, giving 7
-# targets with the full 47k rows retained."
+# The 7 routing targets (8 raw categories; two access-related labels merged into one queue).
 CATEGORIES: list[str] = [
     "Infrastructure",
     "Access Management",
@@ -56,45 +53,37 @@ CATEGORIES: list[str] = [
     "General IT",
 ]
 
-# ── Embedding model ─────────────────────────────────────────────────────────
+# embedding model
 EMBEDDING_MODEL  = "all-MiniLM-L6-v2"   # 384-dim, fast, strong on short text
 MAX_SEQ_LENGTH   = 256
 
-# ── Training ────────────────────────────────────────────────────────────────
+# training
 TEST_SIZE    = 0.2
 VAL_SIZE     = 0.1   # carved from train split, used for calibration
 RANDOM_STATE = 42
 
-# ── Calibration ─────────────────────────────────────────────────────────────
+# calibration
 TEMPERATURE_INIT = 1.5   # starting value for scipy optimiser
 
-# ── Confidence gate ──────────────────────────────────────────────────────────
-# This is the τ in the diagram. Tune it via the coverage-accuracy curve;
-# a good starting point is 0.75. The sweep in evaluate.py will show the
-# full tradeoff so you can justify whatever you pick.
+# confidence gate (τ) — tune via the coverage-accuracy curve in evaluate.py
 DEFAULT_THRESHOLD = 0.75
 
-# ── RAG ─────────────────────────────────────────────────────────────────────
+# RAG
 TOP_K = 3   # number of similar tickets to retrieve
 
-# ── Out-of-distribution (OOD) detection ──────────────────────────────────────
-# A closed-world classifier forces every input into one of the 7 queues.
-# These two signals flag inputs that likely don't belong to any queue so the
-# API can warn instead of silently routing (e.g. a lunch order → Infrastructure).
-#   • Normalised prediction entropy above OOD_ENTROPY_THRESHOLD → distribution
-#     is near-uniform, the model is guessing.
-#   • Top retrieval similarity below OOD_SIMILARITY_THRESHOLD → nothing in the
-#     historical corpus looks like this ticket.
+# OOD detection — two signals flag inputs likely outside the 7 queues:
+#   • high entropy (near-uniform distribution → model is guessing)
+#   • low top-retrieval similarity (nothing in corpus matches)
 OOD_ENTROPY_THRESHOLD    = 0.80
 OOD_SIMILARITY_THRESHOLD = 0.45
 
-# ── Clustering ───────────────────────────────────────────────────────────────
+# clustering
 DBSCAN_EPS               = 0.4    # cosine-distance neighbourhood radius
 DBSCAN_MIN_SAMPLES       = 3
 AUTOMATION_FLAG_MIN_SIZE = 5      # flag cluster if it has >= this many tickets
 
 
-# ── Quick sanity check ───────────────────────────────────────────────────────
+# quick sanity check
 if __name__ == "__main__":
     import pandas as pd, sys
     csv_path = DATA_DIR / "tickets.csv"

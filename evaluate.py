@@ -1,13 +1,12 @@
 """
 evaluate.py
-───────────
 Comprehensive evaluation — run after train.py.
 
 Produces:
   1. Classification report  (per-class precision / recall / F1)
   2. Confusion matrix        (saved to plots/)
-  3. Reliability diagram     (calibration before & after — key for interviews)
-  4. Coverage-accuracy curve (τ sweep — your main quantitative result)
+  3. Reliability diagram     (calibration before & after)
+  4. Coverage-accuracy curve (τ sweep — main quantitative result)
   5. RAG precision@k
   6. Cluster analysis on val set
 
@@ -26,8 +25,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# Windows consoles default to cp1252 and crash on the box-drawing characters
-# used in the section banners. Force UTF-8 output where the stream supports it.
+# Windows consoles default to cp1252 — force UTF-8 output where the stream supports it.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 import matplotlib.gridspec as gridspec
@@ -61,7 +59,7 @@ def parse_args():
     return p.parse_args()
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# helpers
 
 def reliability_diagram(
     probs_raw: np.ndarray,
@@ -72,8 +70,7 @@ def reliability_diagram(
 ):
     """Plot calibration curves for raw vs temperature-scaled probabilities.
 
-    The key interview visual: show that after calibration, a 0.9 confidence
-    prediction is correct ~90% of the time.
+    Shows that after calibration, a 0.9 confidence prediction is correct ~90% of the time.
     """
     fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharey=True)
     fig.suptitle("Reliability Diagram  (closer to diagonal = better calibration)",
@@ -210,7 +207,7 @@ def plot_confusion_matrix(
     print(f"[evaluate] Confusion matrix saved → {save_path}")
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
+# main
 
 def main():
     args = parse_args()
@@ -232,7 +229,7 @@ def main():
 
     classes = list(le.classes_)
 
-    print("\n━━  1 / 5  ─  Classification report  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    print("\n[evaluate] 1/5: classification report\n")
     # Raw probs (no calibration — for comparison)
     from scipy.special import softmax as sp_softmax
     raw_probs_test = sp_softmax(
@@ -247,10 +244,10 @@ def main():
     print(classification_report(y_test, y_pred, target_names=classes))
     print(f"Macro-F1: {macro_f1:.4f}")
 
-    print("\n━━  2 / 5  ─  Confusion matrix  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("[evaluate] 2/5: confusion matrix")
     plot_confusion_matrix(y_test, y_pred, classes)
 
-    print("\n━━  3 / 5  ─  Reliability diagram  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("[evaluate] 3/5: reliability diagram")
     raw_probs_val = sp_softmax(
         router.clf.decision_function(X_val) / 1.0, axis=1
     )
@@ -259,7 +256,7 @@ def main():
     )
     reliability_diagram(raw_probs_val, cal_probs_val, y_val)
 
-    print("\n━━  4 / 5  ─  Coverage-accuracy curve  ━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("[evaluate] 4/5: coverage-accuracy curve")
     auc = coverage_accuracy_curve(cal_probs_test, y_test)
     print(f"[evaluate] Coverage-accuracy AUC: {auc:.4f}")
 
@@ -272,7 +269,7 @@ def main():
     print(f"  Routing accuracy on auto-routed: {auto_acc:.4f}")
     print(f"  Escalated   : {(~auto_mask).sum():,} tickets")
 
-    print("\n━━  5 / 5  ─  Historical retrieval: category-match@k  ━━━━━━━━━━━━━━")
+    print("[evaluate] 5/5: historical retrieval (category-match@k)")
     print("[evaluate] Note: metric is category-match@k (proxy — same queue = assumed relevant).")
     print("[evaluate] Not standard IR Precision@k — no human relevance annotations exist.")
     try:
@@ -284,7 +281,7 @@ def main():
     except FileNotFoundError:
         print("[evaluate] FAISS index not found — skipping retrieval eval.")
 
-    print("\n━━  Done  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("[evaluate] done")
     print(f"\n  Macro-F1          : {macro_f1:.4f}")
     print(f"  Coverage @ τ={args.threshold} : {auto_mask.mean()*100:.1f}%")
     print(f"  Acc @ coverage    : {auto_acc:.4f}")

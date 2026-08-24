@@ -1,6 +1,5 @@
 """
 src/audit.py
-────────────
 Append-only JSONL audit log + escalation-rate monitor.
 
 Every /predict call appends one line; /feedback appends another.
@@ -9,8 +8,7 @@ The monitor reads the last N hours of entries to compute KPIs.
 Log location: AUDIT_LOG_PATH in src/config.py  (default: logs/audit.jsonl).
 The directory is created on first write if it does not exist.
 
-Log entry shapes
-────────────────
+Log entry shapes:
 predict:
   {"ts": "...", "type": "predict", "ticket_id": "...", "text_hash": "...",
    "category": "...", "confidence": 0.92, "escalate": false,
@@ -56,7 +54,7 @@ def text_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
-# ── Writers ───────────────────────────────────────────────────────────────────
+# writers
 
 def log_prediction(
     *,
@@ -102,7 +100,7 @@ def log_feedback(
     })
 
 
-# ── Monitor ───────────────────────────────────────────────────────────────────
+# monitor
 
 def compute_kpis(window_hours: int = 24) -> dict:
     """

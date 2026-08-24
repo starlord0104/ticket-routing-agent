@@ -1,14 +1,12 @@
 """
 robustness_test.py
-──────────────────
 Tests the routing system on five deliberately challenging ticket types.
 Run this after training to verify the confidence gate fires correctly.
 
     python robustness_test.py
 
-The key claim this validates: when the system is uncertain, it escalates
-rather than misrouting. That is what makes the confidence gate useful —
-it's not just a metric, it's a safety net with measurable behaviour.
+Validates that when the system is uncertain, it escalates rather than
+misrouting — the confidence gate is a safety net with measurable behaviour.
 """
 
 import sys, warnings, joblib
@@ -19,8 +17,7 @@ from pathlib import Path
 warnings.filterwarnings("ignore")
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Windows consoles default to cp1252 and crash on the box-drawing characters
-# used in the progress banners. Force UTF-8 output where the stream supports it.
+# Windows consoles default to cp1252 — force UTF-8 output where the stream supports it.
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -31,7 +28,7 @@ from src.config     import (
 from src.preprocess import clean_text
 from src.ood        import ood_decision
 
-# ── Load models ────────────────────────────────────────────────────────────────
+# load models
 try:
     clf    = joblib.load(MODELS_DIR / "classifier.pkl")
     le     = joblib.load(MODELS_DIR / "label_encoder.pkl")
@@ -109,7 +106,7 @@ def embed(text: str):
     return _encode_clf([clean_text(text)])
 
 
-# ── Route helper ───────────────────────────────────────────────────────────────
+# route helper
 def route(text: str) -> dict:
     emb    = embed(text)
     logits = clf.decision_function(emb)
@@ -143,7 +140,7 @@ def route(text: str) -> dict:
     }
 
 
-# ── Five test cases ────────────────────────────────────────────────────────────
+# five test cases
 TESTS = [
     {
         "name":     "1 — Clear-cut Procurement ticket",
@@ -193,7 +190,7 @@ TESTS = [
     },
 ]
 
-# ── Run & report ───────────────────────────────────────────────────────────────
+# run & report
 PASS = "✅ PASS"
 FAIL = "❌ FAIL"
 SEP  = "─" * 72
