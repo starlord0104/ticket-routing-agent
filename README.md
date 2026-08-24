@@ -286,24 +286,3 @@ OpenAPI docs: `http://localhost:8000/docs`
 | CI              | GitHub Actions             | pytest on every push |
 | Audit log       | JSONL (append-only)        | Every prediction + correction recorded; feeds /monitor |
 
----
-
-## Interview answers
-
-**"Walk me through your model choice."**
-Started with TF-IDF + Logistic Regression (macro-F1 0.86, trains in under a minute). Then fine-tuned `all-MiniLM-L6-v2` end-to-end as a 7-class sequence classifier — macro-F1 improved to 0.88. The key improvement was adding weighted cross-entropy loss to handle class imbalance: Infrastructure had 5× more training samples than Procurement, causing the baseline to misroute purchase requests to hardware at 98% confidence. Weighted loss brought Procurement F1 from 0.93 → 0.94 and fixed the production failure. The decision to fine-tune was evidence-based, not assumed.
-
-**"What does your confidence score mean?"**
-After temperature scaling, the confidence tracks observed accuracy closely — ECE drops from 0.072 to 0.015 on the validation set. The reliability diagram shows the calibration curve before and after. Without calibration, raw softmax is overconfident and the threshold becomes meaningless.
-
-**"How did you choose τ?"**
-By sweeping 0.5 to 0.99 and plotting coverage vs. routing accuracy. At τ=0.75: 74.7% coverage at 94.2% precision. The right τ depends on whether you optimise for throughput or accuracy — 0.75 is a starting point, not a universal answer.
-
-**"What's the hardest category pair?"**
-Infrastructure and Access Management. A ticket about hardware setup for a new hire is genuinely ambiguous — it could go to either queue. The model's confusion here reflects real label ambiguity in the data, not a model failure.
-
-**"Why not call it an agent?"**
-It doesn't plan, use tools, or pursue goals across steps. It classifies a ticket, estimates confidence, and routes or escalates. "Confidence-aware routing system" is accurate.
-
-**"What would you add in production?"**
-Heuristic OOD detection is already in (`src/ood.py`); next steps are a trained OOD class, prediction-distribution monitoring for confidence drift, and a retraining trigger based on escalation-rate increase. The cluster analysis tab already surfaces recurring issues as automation candidates — that is the production monitoring seed.
