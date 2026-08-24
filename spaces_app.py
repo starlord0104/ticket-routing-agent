@@ -286,8 +286,8 @@ with st.sidebar:
     st.divider()
     st.markdown("### How the system works")
     st.markdown("""
-1. Ticket text is **vectorised** (TF-IDF / MiniLM)
-2. **Logistic classifier** predicts the routing queue
+1. Ticket text is encoded by a **fine-tuned MiniLM** transformer
+2. **Sequence classifier** predicts the routing queue (7 classes)
 3. **Temperature scaling** calibrates the confidence score
 4. Below τ → **escalate**; above τ → **auto-route**
 5. **FAISS retrieval** surfaces the 3 most similar past tickets
@@ -488,11 +488,11 @@ with tab_route:
 # TAB 2 — SYSTEM METRICS
 # ══════════════════════════════════════════════════════════════════════════════
 with tab_metrics:
-    st.markdown("## System metrics  (hybrid model — measured on 9,567 test tickets)")
+    st.markdown("## System metrics  (fine-tuned MiniLM — measured on 4,784 held-out test tickets)")
 
     met1, met2, met3, met4 = st.columns(4)
-    met1.metric("Macro-F1",            "0.86")
-    met2.metric("ECE after calibration","0.012")
+    met1.metric("Macro-F1",            "0.88")
+    met2.metric("ECE after calibration","0.015")
     met3.metric("Coverage @ τ=0.75",   "74.7%")
     met4.metric("Routing acc @ τ=0.75","0.942")
 
@@ -501,7 +501,7 @@ with tab_metrics:
     for col, fname, title in zip(
         [pc1, pc2, pc3],
         ["reliability_diagram.png", "coverage_accuracy_curve.png", "confusion_matrix.png"],
-        ["Reliability diagram", "Coverage–accuracy curve", "Confusion matrix"],
+        ["Reliability diagram", "Coverage–accuracy curve", "Confusion matrix (baseline)"],
     ):
         path = PLOTS_DIR / fname
         with col:
@@ -512,14 +512,14 @@ with tab_metrics:
                 st.info("Run `python evaluate.py` to generate.")
 
     st.divider()
-    st.markdown("### Per-class breakdown")
+    st.markdown("### Per-class breakdown  (fine-tuned MiniLM, test set)")
     per_class = pd.DataFrame({
-        "Queue":        ["Procurement","Storage","Access Management","HR Support",
-                         "Infrastructure","General IT","Internal Project"],
-        "Precision":    [0.97, 0.94, 0.89, 0.86, 0.80, 0.84, 0.91],
-        "Recall":       [0.88, 0.81, 0.83, 0.87, 0.89, 0.83, 0.76],
-        "F1":           [0.93, 0.87, 0.86, 0.86, 0.84, 0.84, 0.83],
-        "Test support": [493, 555, 1777, 2183, 2723, 1412, 424],
+        "Queue":        ["Access Management","General IT","HR Support",
+                         "Infrastructure","Internal Project","Procurement","Storage"],
+        "Precision":    [0.90, 0.83, 0.87, 0.86, 0.86, 0.96, 0.89],
+        "Recall":       [0.89, 0.83, 0.88, 0.86, 0.85, 0.92, 0.90],
+        "F1":           [0.89, 0.83, 0.87, 0.86, 0.86, 0.94, 0.89],
+        "Test support": [889, 706, 1091, 1362, 212, 247, 277],
     })
     st.dataframe(per_class.set_index("Queue"), use_container_width=True)
 
